@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from sqlalchemy.exc import IntegrityError
 
 MAX_OVERFLOW = 30
 
@@ -48,6 +49,26 @@ class Group(Base):
             'join_date': self.join_date.isoformat() if self.join_date else None,
             'leave_date': self.leave_date.isoformat() if self.leave_date else None,
             'member_count': self.member_count
+        }
+    
+class VerifyUser(Base):
+    __tablename__ = 'verified_users'
+
+    utc_plus_8 = timezone(timedelta(hours=8))
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(50), unique=True, nullable=False)  # 用户 ID，唯一值
+    chat_id = Column(String(50), nullable=False)  # 用户验证通过的群组 ID
+    verified_at = Column(DateTime(timezone=True), default=datetime.now(utc_plus_8), nullable=False)  # 验证时间
+    is_active = Column(Boolean, default=True, nullable=False)  # 用户是否仍然有效
+
+    def to_dict(self):
+        """将 VerifyUser 模型转换为字典"""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'chat_id': self.chat_id,
+            'verified_at': self.verified_at.isoformat() if self.verified_at else None,
+            'is_active': self.is_active,
         }
 
 async def insert_or_update_group(chat_id, title, group_type, username=None, description=None, member_count=None):
@@ -125,3 +146,48 @@ async def get_active_groups():
         except Exception as e:
             logging.error(f"獲取活躍群組時發生錯誤: {e}")
             return []
+        
+async def add_verified_user(user_id: str, chat_id: str):
+    """将已验证用户添加到数据库中"""
+    utc_plus_8 = timezone(timedelta(hours=8))
+    async with Session() as session:
+        try:
+            async with session.begin():
+                # 检查是否存在
+                stmt = select(VerifyUser).where(VerifyUser.user_id == user_id)
+                result = await session.execute(stmt)
+                existing_user = result.scalar_one_or_none()
+
+                if existing_user:
+                    # 更新现有记录
+                    stmt_update = (
+                        update(VerifyUser)
+                        .where(VerifyUser.user_id == user_id)
+                        .values(
+                            chat_id=chat_id,
+                            verified_at=datetime.now(utc_plus_8),
+                            is_active=True
+                        )
+                    )
+                    await session.execute(stmt_update)
+                    return False  # 用户已存在
+                else:
+                    # 添加新用户
+                    new_user = VerifyUser(user_id=user_id, chat_id=chat_id)
+                    session.add(new_user)
+                    return True  # 新用户插入成功
+        except IntegrityError:
+            await session.rollback()
+            raise
+
+async def is_user_verified(user_id: str) -> bool:
+    """检查用户是否已验证"""
+    async with Session() as session:
+        try:
+            stmt = select(VerifyUser).where(VerifyUser.user_id == user_id, VerifyUser.is_active == True)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            return user is not None
+        except Exception as e:
+            logging.error(f"检查用户是否已验证时发生错误: {e}")
+            return False
