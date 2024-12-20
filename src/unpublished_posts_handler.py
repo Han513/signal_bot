@@ -28,19 +28,20 @@ async def download_image(url, file_path):
         logger.error(f"Error downloading image: {e}")
         return None
 
-async def fetch_unpublished_posts(posts_url, headers, payload):
+async def fetch_unpublished_posts(posts_url, headers):
     """
     调用 /posts/list 接口，检查未发布的文章
     """
     try:
         # 将 payload 转换为查询字符串参数
-        params = urllib.parse.urlencode(payload)
+        # params = urllib.parse.urlencode(payload)
 
         async with aiohttp.ClientSession() as session:
             # 使用 params 参数将 payload 传递给 GET 请求
-            async with session.get(posts_url, headers=headers, params=params) as response:
+            async with session.get(posts_url, headers=headers) as response:
                 if response.status == 200:
                     posts_data = await response.json()
+                    print(posts_data)
                     return posts_data.get("data", {}).get("items", [])  # 返回 items 列表
                 else:
                     logger.error(f"获取文章列表失败，状态码: {response.status}")
@@ -53,13 +54,14 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
     """
     发布文章到目标群组的特定主题，并更新文章状态
     """
-    # socials_url = "http://127.0.0.1:5002/admin/telegram/social/socials"  # 查询 socialGroup 和 chatId 的接口
-    socials_url = "http://172.25.183.151:4070/admin/telegram/social/socials"  # 查询 socialGroup 和 chatId 的接口
+    socials_url = "http://127.0.0.1:5002/admin/telegram/social/socials"  # 查询 socialGroup 和 chatId 的接口
+    # socials_url = "http://172.25.183.151:4070/admin/telegram/social/socials"  # 查询 socialGroup 和 chatId 的接口
+    socials_payload = {"brand": "BYD", "type": "TELEGRAM"}
 
     try:
         # 获取所有社交平台的配置
         async with aiohttp.ClientSession() as session:
-            async with session.post(socials_url, headers=headers) as response:
+            async with session.post(socials_url, headers=headers, data=socials_payload) as response:
                 if response.status == 200:
                     socials_data = await response.json()
                     social_chats = socials_data.get("data", [])
@@ -76,7 +78,6 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
         content = post.get("content")
         image = post.get("image")
         post_id = post.get("id")
-        print(post_id)
 
         if not topic or not content:
             logger.warning(f"文章数据不完整，跳过: {post}")

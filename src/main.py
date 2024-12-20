@@ -131,16 +131,128 @@ async def generate_invite_link(bot: Bot, chat_id: int) -> str:
         logging.error(f"生成邀请链接失败: {e}")
         return None
 
+# @router.message(Command("verify"))
+# async def handle_verify_command(message: types.Message):
+#     """处理 /verify 指令，并调用 verify 接口"""
+
+#     try:
+#         # 尝试删除用户的消息以防止泄露
+#         try:
+#             await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+#         except Exception as e:
+#             logger.error(f"无法删除用户消息: {e}")
+
+#         # 分割指令以提取验证码
+#         command_parts = message.text.split()
+#         if len(command_parts) < 2:
+#             await bot.send_message(
+#                 chat_id=message.chat.id,
+#                 text="请提供验证码，例如: /verify 123456"
+#             )
+#             return
+
+#         verify_code = command_parts[1]
+#         chat_id = message.chat.id  # 当前群组 ID
+
+#         # 使用 user_id 标记用户
+#         user_id = str(message.from_user.id)
+#         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
+
+#         # 获取当前群组的 owner 信息
+#         try:
+#             admins = await bot.get_chat_administrators(chat_id)
+#             owner = next(
+#                 (admin for admin in admins if admin.status == "creator"), None
+#             )
+#             admin_mention = (
+#                 f'<a href="tg://user?id={owner.user.id}">{owner.user.full_name}</a>' if owner else "@admin"
+#             )
+#         except Exception as e:
+#             logger.error(f"无法获取群组 {chat_id} 的管理员信息: {e}")
+#             admin_mention = "@admin"
+
+#         # 调用 verify API
+#         # verify_url = "http://127.0.0.1:5002/admin/telegram/social/verify"
+#         verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
+#         headers = {"Content-Type": "application/x-www-form-urlencoded"}
+#         verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": "BYD", "type": "TELEGRAM"}
+
+#         async with aiohttp.ClientSession() as session_http:
+#             async with session_http.post(verify_url, headers=headers, data=verify_payload) as response:
+#                 response_data = await response.json()
+#                 logger.info(f"Verify API Response: {response_data}")
+
+#                 # 判断返回的状态码和数据内容
+#                 if response.status == 200 and "verification successful" in response_data.get("data", ""):
+#                     # 验证成功，生成单人邀请链接
+#                     info_group_chat_id=None
+#                     # detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
+#                     detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
+#                     detail_payload = {"verifyGroup": chat_id, "brand": "BYD", "type": "TELEGRAM"}
+#                     async with session_http.post(detail_url, headers=headers, data=detail_payload) as detail_response:
+#                         detail_data = await detail_response.json()
+#                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
+#                     try:
+#                         invite_link = await bot.create_chat_invite_link(
+#                             chat_id=info_group_chat_id,
+#                             name=f"Invite for {message.from_user.full_name}",
+#                             member_limit=1,  # 限制链接只能被1人使用
+#                             expire_date=int(time.time()) + 3600  # 链接1小时后过期
+#                         )
+
+#                         # 添加到数据库
+#                         await add_verified_user(user_id, str(info_group_chat_id))
+
+#                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
+#                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
+#                         response_data["data"] = response_data["data"].replace("@{admin}", admin_mention)
+#                         await bot.send_message(
+#                             chat_id=message.chat.id,
+#                             text=response_data["data"],
+#                             parse_mode="HTML"
+#                         )
+#                         logger.info(f"生成的受限制邀请链接：{invite_link.invite_link}")
+
+#                     except Exception as e:
+#                         logger.error(f"生成邀请链接失败: {e}")
+#                         await bot.send_message(
+#                             chat_id=message.chat.id,
+#                             text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
+#                         )
+#                 else:
+#                     # 将接口的返回数据直接返回给用户
+#                     error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
+#                     error_message = error_message.replace("@{admin}", admin_mention)
+#                     await bot.send_message(
+#                         chat_id=message.chat.id,
+#                         text=error_message,
+#                         parse_mode="HTML"
+#                     )
+#     except Exception as e:
+#         logger.error(f"调用验证 API 时出错: {e}")
+#         await bot.send_message(
+#             chat_id=message.chat.id,
+#             text="验证时发生错误，请稍后再试。"
+#         )
+async def delete_message_after_delay(chat_id: int, message_id: int, delay: int):
+    """延迟删除指定消息"""
+    try:
+        await asyncio.sleep(delay)  # 等待指定的时间
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)  # 删除消息
+        logger.info(f"消息已成功删除，Chat ID: {chat_id}, Message ID: {message_id}")
+    except Exception as e:
+        logger.error(f"删除消息时发生错误: {e}")
+
 @router.message(Command("verify"))
 async def handle_verify_command(message: types.Message):
     """处理 /verify 指令，并调用 verify 接口"""
 
     try:
         # 尝试删除用户的消息以防止泄露
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-        except Exception as e:
-            logger.error(f"无法删除用户消息: {e}")
+        # try:
+        #     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        # except Exception as e:
+        #     logger.error(f"无法删除用户消息: {e}")
 
         # 分割指令以提取验证码
         command_parts = message.text.split()
@@ -158,6 +270,17 @@ async def handle_verify_command(message: types.Message):
         user_id = str(message.from_user.id)
         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
 
+        # 检查用户是否已验证
+        verification_status  = await is_user_verified(user_id, str(chat_id), str(verify_code))
+        if verification_status == "warning":
+            # 验证码属于其他用户
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text="<b>This UID has already been verified</b>",
+                parse_mode="HTML"
+            )
+            return        
+
         # 获取当前群组的 owner 信息
         try:
             admins = await bot.get_chat_administrators(chat_id)
@@ -172,10 +295,10 @@ async def handle_verify_command(message: types.Message):
             admin_mention = "@admin"
 
         # 调用 verify API
-        verify_url = "http://127.0.0.1:5002/admin/telegram/social/verify"
-        # verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
+        # verify_url = "http://127.0.0.1:5002/admin/telegram/social/verify"
+        verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": "BYD"}
+        verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": "BYD", "type": "TELEGRAM"}
 
         async with aiohttp.ClientSession() as session_http:
             async with session_http.post(verify_url, headers=headers, data=verify_payload) as response:
@@ -185,43 +308,45 @@ async def handle_verify_command(message: types.Message):
                 # 判断返回的状态码和数据内容
                 if response.status == 200 and "verification successful" in response_data.get("data", ""):
                     # 验证成功，生成单人邀请链接
-                    info_group_chat_id=None
-                    detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
-                    # detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
-                    detail_payload = {"verifyGroup": chat_id, "brand": "BYD"}
+                    info_group_chat_id = None
+                    # detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
+                    detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
+                    detail_payload = {"verifyGroup": chat_id, "brand": "BYD", "type": "TELEGRAM"}
                     async with session_http.post(detail_url, headers=headers, data=detail_payload) as detail_response:
                         detail_data = await detail_response.json()
+                        verify_group_chat_id = detail_data.get("data").get("verifyGroup")  # 替换为你的资讯群 ID
                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
                     try:
                         invite_link = await bot.create_chat_invite_link(
                             chat_id=info_group_chat_id,
                             name=f"Invite for {message.from_user.full_name}",
-                            member_limit=1,  # 限制链接只能被1人使用
-                            expire_date=int(time.time()) + 3600  # 链接1小时后过期
+                            # member_limit=1,  # 限制链接只能被1人使用
+                            # expire_date=int(time.time()) + 3600  # 链接1小时后过期
                         )
 
                         # 添加到数据库
-                        await add_verified_user(user_id, str(info_group_chat_id))
+                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), str(verify_code))
 
                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
                         response_data["data"] = response_data["data"].replace("@{admin}", admin_mention)
-                        await bot.send_message(
+                        response_message  = await bot.send_message(
                             chat_id=message.chat.id,
                             text=response_data["data"],
                             parse_mode="HTML"
                         )
-                        logger.info(f"生成的受限制邀请链接：{invite_link.invite_link}")
+                        asyncio.create_task(delete_message_after_delay(response_message.chat.id, response_message.message_id, 10))
+                        logger.info(f"消息已发送并将在 30 分钟后自动删除，消息 ID: {response_message.message_id}")
 
                     except Exception as e:
                         logger.error(f"生成邀请链接失败: {e}")
                         await bot.send_message(
                             chat_id=message.chat.id,
-                            text="验证成功，但生成邀请链接时发生错误，请稍后重试。"
+                            text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
                         )
                 else:
                     # 将接口的返回数据直接返回给用户
-                    error_message = response_data.get("data", "验证失败，请检查验证码后重试。")
+                    error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
                     error_message = error_message.replace("@{admin}", admin_mention)
                     await bot.send_message(
                         chat_id=message.chat.id,
@@ -251,20 +376,40 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
 
         logger.info(f"Chat ID: {chat_id}, User ID: {user_id}, Old Status: {old_status}, New Status: {new_status}")
 
-        # 检查是否是验证群
-        welcome_msg_url = "http://127.0.0.1:5002/admin/telegram/social/welcome_msg"
-        # welcome_msg_url = "http://172.25.183.151:4070/admin/telegram/social/welcome_msg"
+        # 定义 API URLs
+        # welcome_msg_url = "http://127.0.0.1:5002/admin/telegram/social/welcome_msg"
+        welcome_msg_url = "http://172.25.183.151:4070/admin/telegram/social/welcome_msg"
+        # social_url = "http://127.0.0.1:5002/admin/telegram/social/socials"
+        social_url = "http://172.25.183.151:4070/admin/telegram/social/socials"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        payload = {"verifyGroup": str(chat_id), "brand": "BYD"}
+        payload = {"verifyGroup": str(chat_id), "brand": "BYD", "type": "TELEGRAM"}
 
         is_verification_group = False
         welcome_message = None
 
+        # 获取所有资讯群 ID
+        social_groups = set()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(social_url, headers=headers) as response:
+                    if response.status == 200:
+                        social_data = await response.json()
+                        social_groups = {
+                            item["socialGroup"]
+                            for item in social_data.get("data", [])
+                            if "socialGroup" in item
+                        }
+                    else:
+                        logger.error(f"获取资讯群数据失败，状态码: {response.status}")
+        except Exception as e:
+            logger.error(f"调用 /socials 接口失败: {e}")
+
         if old_status != "member" and new_status == "member":
+            # 如果是验证群，调用 welcome_msg_url 检查
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.post(welcome_msg_url, headers=headers, data=payload) as response:
-                        logger.info(f"監聽到用戶加入群組，{await response.json()}")
+                        logger.info(f"监测到用户加入群组，返回数据: {await response.json()}")
                         if response.status == 200:
                             # 判断是否为验证群
                             response_data = await response.json()
@@ -277,21 +422,21 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                             logger.error(f"验证群接口返回失败 {await response.json()}，状态码: {response.status}")
             except Exception as e:
                 logger.error(f"调用验证群接口时出错: {e}")
-
             # 如果是验证群，发送欢迎消息
             if is_verification_group:
                 user_mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
                 welcome_message = welcome_message.replace("@{username}", user_mention)
                 await event.bot.send_message(chat_id=chat_id, text=welcome_message, parse_mode="HTML")
-                logger.info(f"发送欢迎消息给用户 {user_mention}: {welcome_message}")
 
             # 如果是资讯群，检查是否为验证通过的用户
-            elif chat_id == -1002289327992:  # 替换为你的资讯群 ID
-                verified_user = await is_user_verified(user_id)
+            elif str(chat_id) in social_groups:
+                # verified_user = await is_user_verified(user_id)  # 检查是否已验证
+                verified_user = await get_verified_user(user_id, chat_id)
+                print(verified_user)
                 if not verified_user:
                     logger.warning(f"未验证用户 {user_id} 试图加入资讯群 {chat_id}，踢出...")
                     await bot.ban_chat_member(chat_id=chat_id, user_id=int(user_id))
-                    await bot.unban_chat_member(chat_id=chat_id, user_id=int(user_id))  # 可选解禁
+                    # await bot.unban_chat_member(chat_id=chat_id, user_id=int(user_id))  # 可选解禁
                 else:
                     # 已验证用户
                     logger.info(f"验证通过用户 {user_id} 加入资讯群 {chat_id}")
@@ -350,115 +495,6 @@ async def send_to_specific_topic(message: types.Message):
         logger.error(f"發送本地圖片時發生錯誤: {e}")
         await message.reply(f"發送失敗: {e}")
         await message.reply(f"發送失敗: {e}")
-
-# @router.chat_member()
-# async def handle_user_joined(event: ChatMemberUpdated):
-#     """监听用户加入群组的事件并处理逻辑"""
-#     print(event)
-#     old_status = event.old_chat_member.status
-#     new_status = event.new_chat_member.status
-#     print(new_status)
-
-#     # 如果新状态是 'member' 且旧状态不是 'member'，表示用户刚加入群组
-#     if old_status != "member" and new_status == "member":
-#         user = event.from_user  # 获取用户信息
-#         chat = event.chat  # 获取群组信息
-
-#         user_name = user.full_name  # 用户全名
-#         user_mention = f"{user.username}" if user.username else user.full_name  # 如果用户名存在则用 @username
-#         group_id = str(chat.id)  # 当前群组 ID（转换为字符串）
-
-#         # 默认欢迎消息，防止 API 请求失败时未初始化
-#         welcome_message = "Welcome to the group!"
-
-#         # API 配置
-#         # welcome_msg_url = "http://127.0.0.1:5002/admin/telegram/social/welcome_msg"
-#         welcome_msg_url = "http://172.25.183.151:4070/admin/telegram/social/welcome_msg"
-#         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-#         welcome_msg_payload = {"verifyGroup": group_id, "brand": "BYD"}  # 将当前群组 ID 直接作为参数传递
-#         print(welcome_msg_payload)
-#         try:
-#             async with aiohttp.ClientSession() as session:
-#                 async with session.post(welcome_msg_url, headers=headers, data=welcome_msg_payload) as welcome_msg_response:
-#                     print(await welcome_msg_response.json())
-#                     if welcome_msg_response.status == 200:
-#                         # 解析返回的 JSON 数据
-#                         welcome_msg_data = await welcome_msg_response.json()
-
-
-#                         # 获取消息内容并替换 {username}
-#                         raw_message = welcome_msg_data.get("data", "Welcome to the group!")
-#                         welcome_message = raw_message.replace("{username}", user_mention)
-#                     else:
-#                         logger.error(f"Failed to fetch welcome message. Status code: {welcome_msg_response.status}")
-#         except Exception as e:
-#             logger.error(f"处理 API 请求失败: {e}")
-
-#         # 无论 API 是否成功，发送欢迎消息
-#         await event.bot.send_message(
-#             chat_id=group_id,
-#             text=welcome_message,
-#             parse_mode="HTML"
-#         )
-#         logger.info(f"已向用户 {user_mention} 发送欢迎消息: {welcome_message}")
-
-
-# @router.message(Command("send_test_image"))
-# async def send_test_image(message: types.Message):
-#     """使用測試 URL 發送圖片"""
-#     chat_id = message.chat.id
-#     test_image_url = "https://via.placeholder.com/300"  # 測試圖片 URL
-
-#     try:
-#         # 發送圖片
-#         await bot.send_photo(
-#             chat_id=chat_id,
-#             photo=test_image_url,
-#             caption="這是一張測試圖片，來自公共測試 URL"
-#         )
-#         logger.info(f"成功發送測試圖片到 Chat ID: {chat_id}")
-
-#     except Exception as e:
-#         logger.error(f"發送測試圖片失敗: {e}")
-#         await message.reply("發送測試圖片時出現問題，請稍後再試。")
-
-@router.message(Command("send_base64_image"))
-async def send_base64_image(message: types.Message):
-    """處理帶前綴的 Base64 圖片並發送到 Telegram"""
-    chat_id = message.chat.id
-
-    # Google 提供的 Base64 數據（包含前綴）
-    base64_data = (
-            "data:image/jpeg;base64,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")
-    try:
-        # 去除前綴 'data:image/jpeg;base64,'
-        base64_data_clean = base64_data.split(",")[1]
-
-        # 解碼 Base64 數據為二進制
-        image_binary = base64.b64decode(base64_data_clean)
-
-        # 保存為臨時文件
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-            temp_file.write(image_binary)
-            temp_file_path = temp_file.name
-
-        # 使用 FSInputFile 發送圖片
-        photo = FSInputFile(temp_file_path)
-        await bot.send_photo(
-            chat_id=chat_id,
-            photo=photo,
-            caption="這是從 Base64 數據發送的圖片"
-        )
-        logger.info(f"成功發送 Base64 圖片到 Chat ID: {chat_id}")
-
-    except Exception as e:
-        logger.error(f"發送 Base64 圖片失敗: {e}")
-        await message.reply("發送 Base64 圖片時出現問題，請稍後再試。")
-
-    finally:
-        # 刪除臨時文件
-        if 'temp_file_path' in locals() and temp_file_path and os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
 
 async def handle_api_request(request, bot: Bot):
     """
@@ -520,16 +556,16 @@ async def start_aiohttp_server(bot: Bot):
 
 async def periodic_task(bot: Bot):
     """周期性任务，每30秒检查未发布文章并发布"""
-    # posts_url = "http://172.25.183.139:5003/posts/list"
-    # update_url = "http://172.25.183.139:5003/posts/edit"
-    posts_url = "http://127.0.0.1:5003/posts/list"
-    update_url = "http://127.0.0.1:5003/posts/edit"
+    posts_url = "http://172.25.183.139:5003/bot/posts/list?status=0"
+    update_url = "http://172.25.183.139:5003/bot/posts/edit"
+    # posts_url = "http://127.0.0.1:5003/bot/posts/list?status=0"
+    # update_url = "http://127.0.0.1:5003/bot/posts/edit"
     headers = {"Content-Type": "application/json"}
-    payload = {"status": 0}  # 未发布文章的状态
+    # payload = {"status": 0}  # 未发布文章的状态
 
     try:
         while True:
-            posts_list = await fetch_unpublished_posts(posts_url, headers, payload)
+            posts_list = await fetch_unpublished_posts(posts_url, headers)
 
             if posts_list:
                 await publish_posts(bot, posts_list, update_url, headers)
@@ -541,30 +577,6 @@ async def periodic_task(bot: Bot):
         logger.info("周期性任务被取消，正在退出...")
         raise
 
-# async def main():
-#     try:
-#         dp.include_router(router)
-#         await asyncio.gather(
-#             periodic_task(bot),
-#             start_aiohttp_server(),
-#             dp.start_polling(bot)
-#         )
-#     except KeyboardInterrupt:
-#         logger.info("收到中断信号，正在关闭...")
-#         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-#         for task in tasks:
-#             task.cancel()
-#         await asyncio.gather(*tasks, return_exceptions=True)
-#         await bot.session.close()
-#         await dp.shutdown()
-#     finally:
-#         logger.info("应用程序已退出。")
-
-# if __name__ == "__main__":
-#     try:
-#         asyncio.run(main())
-#     except KeyboardInterrupt:
-#         print("程序已中断，成功退出。")
 async def main():
     """主函数"""
     try:

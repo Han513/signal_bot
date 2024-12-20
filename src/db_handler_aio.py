@@ -57,7 +57,9 @@ class VerifyUser(Base):
     utc_plus_8 = timezone(timedelta(hours=8))
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(50), unique=True, nullable=False)  # 用户 ID，唯一值
-    chat_id = Column(String(50), nullable=False)  # 用户验证通过的群组 ID
+    verify_group_id = Column(String(50), nullable=False)  # 用户验证通过的群组 ID
+    info_group_id = Column(String(50), nullable=False)  # 用户验证通过的群组 ID
+    verify_code = Column(String(50), nullable=False)  # 用户验证通过的群组 ID
     verified_at = Column(DateTime(timezone=True), default=datetime.now(utc_plus_8), nullable=False)  # 验证时间
     is_active = Column(Boolean, default=True, nullable=False)  # 用户是否仍然有效
 
@@ -66,7 +68,9 @@ class VerifyUser(Base):
         return {
             'id': self.id,
             'user_id': self.user_id,
-            'chat_id': self.chat_id,
+            'verify_group_id': self.verify_group_id,
+            'info_group_id': self.info_group_id,
+            'verify_code': self.verify_code,
             'verified_at': self.verified_at.isoformat() if self.verified_at else None,
             'is_active': self.is_active,
         }
@@ -147,7 +151,7 @@ async def get_active_groups():
             logging.error(f"獲取活躍群組時發生錯誤: {e}")
             return []
 
-async def add_verified_user(user_id: str, chat_id: str):
+async def add_verified_user(user_id: str, verify_group_id: str, info_group_id: str, verify_code:int):
     """将已验证用户添加到数据库中"""
     utc_plus_8 = timezone(timedelta(hours=8))
     async with Session() as session:
@@ -164,7 +168,9 @@ async def add_verified_user(user_id: str, chat_id: str):
                         update(VerifyUser)
                         .where(VerifyUser.user_id == user_id)
                         .values(
-                            chat_id=chat_id,
+                            verify_group_id=verify_group_id,
+                            info_group_id=info_group_id,
+                            verify_code=verify_code,
                             verified_at=datetime.now(utc_plus_8),
                             is_active=True
                         )
@@ -173,21 +179,51 @@ async def add_verified_user(user_id: str, chat_id: str):
                     return False  # 用户已存在
                 else:
                     # 添加新用户
-                    new_user = VerifyUser(user_id=user_id, chat_id=chat_id)
+                    new_user = VerifyUser(user_id=user_id, verify_group_id=verify_group_id, info_group_id=info_group_id, verify_code=verify_code, verified_at=datetime.now(utc_plus_8), is_active=True)
                     session.add(new_user)
                     return True  # 新用户插入成功
         except IntegrityError:
             await session.rollback()
             raise
 
-async def is_user_verified(user_id: str) -> bool:
-    """检查用户是否已验证"""
+async def is_user_verified(user_id: str, verify_group_id: str, verify_code: str) -> str:
+
     async with Session() as session:
         try:
-            stmt = select(VerifyUser).where(VerifyUser.user_id == user_id, VerifyUser.is_active == True)
+            # 查询是否存在与 verify_code 和 verify_group_id 匹配的记录
+            stmt = select(VerifyUser).where(
+                VerifyUser.verify_group_id == verify_group_id,
+                VerifyUser.verify_code == verify_code,
+                VerifyUser.is_active == True
+            )
+            result = await session.execute(stmt)
+            record = result.scalar_one_or_none()
+
+            if record:
+                # 如果 UID 已存在但 user_id 不同，返回警告
+                if record.user_id != user_id:
+                    return "warning"
+            
+            # 如果没有匹配的记录，返回未验证
+            return "not_verified"
+        except Exception as e:
+            logging.error(f"检查用户是否已验证时发生错误: {e}")
+            return "not_verified"
+        
+async def get_verified_user(user_id: str, info_group_id: str) -> bool:
+    """
+    检查用户是否已验证，并确认用户的 info_group_id 是否与当前群组 ID 匹配。
+    """
+    async with Session() as session:
+        try:
+            stmt = select(VerifyUser).where(
+                VerifyUser.user_id == user_id,
+                VerifyUser.info_group_id == info_group_id,
+                VerifyUser.is_active == True
+            )
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
-            return user is not None
+            return user is not None  # 如果找到匹配记录，则返回 True，否则返回 False
         except Exception as e:
             logging.error(f"检查用户是否已验证时发生错误: {e}")
             return False
