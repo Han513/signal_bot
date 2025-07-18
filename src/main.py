@@ -1,4 +1,3 @@
-# import base64
 import os
 import asyncio
 import aiohttp
@@ -6,19 +5,27 @@ import logging
 import base64
 import tempfile
 import time
-import signal
+import aiofiles
 from aiohttp import web
+from functools import partial
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
 from aiogram.types import ChatMemberUpdated, FSInputFile
 from dotenv import load_dotenv
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.exceptions import TelegramBadRequest
 # from unpublished_posts_handler import periodic_api_check  # 引入 API 檢查模組
 
 # 導入 Group 相關函數
 from db_handler_aio import *
 from unpublished_posts_handler import fetch_unpublished_posts, publish_posts
+from handlers.copy_signal_handler import handle_send_copy_signal
+from handlers.weekly_report_handler import handle_weekly_report
+from handlers.scalp_update_handler import handle_scalp_update
+from handlers.holding_report_handler import handle_holding_report
+from handlers.trade_summary_handler import handle_trade_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +36,16 @@ logger = logging.getLogger(__name__)
 # 加载环境变量
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+PRODUCT_IP = os.getenv("PRODUCT_IP")
+WELCOME_API = os.getenv("WELCOME_API")
+VERIFY_API = os.getenv("VERIFY_API")
+DETAIL_API = os.getenv("DETAIL_API")
+SOCIAL_API = os.getenv("SOCIAL_API")
+MESSAGE_API_URL = os.getenv("MESSAGE_API_URL")
+UPDATE_MESSAGE_API_URL = os.getenv("UPDATE_MESSAGE_API_URL")
+DISCORD_BOT = os.getenv("DISCORD_BOT")
+
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -37,6 +54,8 @@ stop_event = asyncio.Event()
 router = Router()
 group_chat_ids = set()
 verified_users = {}
+
+ALLOWED_ADMIN_IDS = [7067100466, 7257190337, 7182693065]
 
 async def heartbeat(bot: Bot, interval: int = 60):
     """定期向 Telegram 服务器发送心跳请求"""
@@ -63,12 +82,17 @@ async def load_active_groups():
     group_chat_ids.clear()
 
     try:
-        active_groups = (await get_active_groups())
+        # 添加超時處理
+        active_groups = await asyncio.wait_for(get_active_groups(), timeout=10.0)
         group_chat_ids.update(active_groups)
         logger.info(f"从数据库加载了{len(active_groups)}个活跃群组")
 
+    except asyncio.TimeoutError:
+        logger.error("加载活跃群组超时，使用空列表")
+        group_chat_ids.update([])
     except Exception as e:
-        logger.error(f"异常：{e}")
+        logger.error(f"加载活跃群组异常：{e}，使用空列表")
+        group_chat_ids.update([])
 
 @router.my_chat_member()
 async def handle_my_chat_member(event: ChatMemberUpdated):
@@ -131,109 +155,6 @@ async def generate_invite_link(bot: Bot, chat_id: int) -> str:
         logging.error(f"生成邀请链接失败: {e}")
         return None
 
-# @router.message(Command("verify"))
-# async def handle_verify_command(message: types.Message):
-#     """处理 /verify 指令，并调用 verify 接口"""
-
-#     try:
-#         # 尝试删除用户的消息以防止泄露
-#         try:
-#             await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-#         except Exception as e:
-#             logger.error(f"无法删除用户消息: {e}")
-
-#         # 分割指令以提取验证码
-#         command_parts = message.text.split()
-#         if len(command_parts) < 2:
-#             await bot.send_message(
-#                 chat_id=message.chat.id,
-#                 text="请提供验证码，例如: /verify 123456"
-#             )
-#             return
-
-#         verify_code = command_parts[1]
-#         chat_id = message.chat.id  # 当前群组 ID
-
-#         # 使用 user_id 标记用户
-#         user_id = str(message.from_user.id)
-#         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
-
-#         # 获取当前群组的 owner 信息
-#         try:
-#             admins = await bot.get_chat_administrators(chat_id)
-#             owner = next(
-#                 (admin for admin in admins if admin.status == "creator"), None
-#             )
-#             admin_mention = (
-#                 f'<a href="tg://user?id={owner.user.id}">{owner.user.full_name}</a>' if owner else "@admin"
-#             )
-#         except Exception as e:
-#             logger.error(f"无法获取群组 {chat_id} 的管理员信息: {e}")
-#             admin_mention = "@admin"
-
-#         # 调用 verify API
-#         # verify_url = "http://127.0.0.1:5002/admin/telegram/social/verify"
-#         verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
-#         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-#         verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": "BYD", "type": "TELEGRAM"}
-
-#         async with aiohttp.ClientSession() as session_http:
-#             async with session_http.post(verify_url, headers=headers, data=verify_payload) as response:
-#                 response_data = await response.json()
-#                 logger.info(f"Verify API Response: {response_data}")
-
-#                 # 判断返回的状态码和数据内容
-#                 if response.status == 200 and "verification successful" in response_data.get("data", ""):
-#                     # 验证成功，生成单人邀请链接
-#                     info_group_chat_id=None
-#                     # detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
-#                     detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
-#                     detail_payload = {"verifyGroup": chat_id, "brand": "BYD", "type": "TELEGRAM"}
-#                     async with session_http.post(detail_url, headers=headers, data=detail_payload) as detail_response:
-#                         detail_data = await detail_response.json()
-#                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
-#                     try:
-#                         invite_link = await bot.create_chat_invite_link(
-#                             chat_id=info_group_chat_id,
-#                             name=f"Invite for {message.from_user.full_name}",
-#                             member_limit=1,  # 限制链接只能被1人使用
-#                             expire_date=int(time.time()) + 3600  # 链接1小时后过期
-#                         )
-
-#                         # 添加到数据库
-#                         await add_verified_user(user_id, str(info_group_chat_id))
-
-#                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
-#                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
-#                         response_data["data"] = response_data["data"].replace("@{admin}", admin_mention)
-#                         await bot.send_message(
-#                             chat_id=message.chat.id,
-#                             text=response_data["data"],
-#                             parse_mode="HTML"
-#                         )
-#                         logger.info(f"生成的受限制邀请链接：{invite_link.invite_link}")
-
-#                     except Exception as e:
-#                         logger.error(f"生成邀请链接失败: {e}")
-#                         await bot.send_message(
-#                             chat_id=message.chat.id,
-#                             text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
-#                         )
-#                 else:
-#                     # 将接口的返回数据直接返回给用户
-#                     error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
-#                     error_message = error_message.replace("@{admin}", admin_mention)
-#                     await bot.send_message(
-#                         chat_id=message.chat.id,
-#                         text=error_message,
-#                         parse_mode="HTML"
-#                     )
-#     except Exception as e:
-#         logger.error(f"调用验证 API 时出错: {e}")
-#         await bot.send_message(
-#             chat_id=message.chat.id,
-#             text="验证时发生错误，请稍后再试。"
-#         )
 async def delete_message_after_delay(chat_id: int, message_id: int, delay: int):
     """延迟删除指定消息"""
     try:
@@ -259,7 +180,7 @@ async def handle_verify_command(message: types.Message):
         if len(command_parts) < 2:
             await bot.send_message(
                 chat_id=message.chat.id,
-                text="请提供验证码，例如: /verify 123456"
+                text="Please provide verification code, for example: /verify 123456"
             )
             return
 
@@ -296,12 +217,13 @@ async def handle_verify_command(message: types.Message):
 
         # 调用 verify API
         # verify_url = "http://127.0.0.1:5002/admin/telegram/social/verify"
-        verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
+        verify_url = "http://172.31.91.67:4070/admin/telegram/social/verify"
+        # verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": "BYD", "type": "TELEGRAM"}
 
         async with aiohttp.ClientSession() as session_http:
-            async with session_http.post(verify_url, headers=headers, data=verify_payload) as response:
+            async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
                 response_data = await response.json()
                 logger.info(f"Verify API Response: {response_data}")
 
@@ -310,9 +232,10 @@ async def handle_verify_command(message: types.Message):
                     # 验证成功，生成单人邀请链接
                     info_group_chat_id = None
                     # detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
-                    detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
+                    detail_url = "http://172.31.91.67:4070/admin/telegram/social/detail"
+                    # detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
                     detail_payload = {"verifyGroup": chat_id, "brand": "BYD", "type": "TELEGRAM"}
-                    async with session_http.post(detail_url, headers=headers, data=detail_payload) as detail_response:
+                    async with session_http.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
                         detail_data = await detail_response.json()
                         verify_group_chat_id = detail_data.get("data").get("verifyGroup")  # 替换为你的资讯群 ID
                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
@@ -336,7 +259,7 @@ async def handle_verify_command(message: types.Message):
                             parse_mode="HTML"
                         )
                         asyncio.create_task(delete_message_after_delay(response_message.chat.id, response_message.message_id, 10))
-                        logger.info(f"消息已发送并将在 30 分钟后自动删除，消息 ID: {response_message.message_id}")
+                        logger.info(f"消息已发送并将在 10 分钟后自动删除，消息 ID: {response_message.message_id}")
 
                     except Exception as e:
                         logger.error(f"生成邀请链接失败: {e}")
@@ -360,10 +283,103 @@ async def handle_verify_command(message: types.Message):
             text="验证时发生错误，请稍后再试。"
         )
 
+# @router.message(Command("unban"))
+# async def unban_user(message: types.Message):
+#     """解除特定用户的 ban 状态"""
+#     try:
+#         # 检查是否为允许使用该命令的管理员
+#         if message.from_user.id not in ALLOWED_ADMIN_IDS:
+#             await message.reply("❌ You do not have permission to use this command.")
+#             return
+
+#         # 提取命令中的用户 ID
+#         command_parts = message.text.split()
+#         if len(command_parts) < 2:
+#             await message.reply("❓ Please provide the user ID who needs to be unbanned. For example: /unban 123456789")
+#             return
+
+#         user_id = int(command_parts[1])  # 从命令中获取目标用户 ID
+#         chat_id = message.chat.id  # 当前群组 ID
+
+#         # 尝试解除 ban
+#         await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+#         await message.reply(f"✅ User {user_id} has been successfully unbanned.")
+#         logger.info(f"管理员 {message.from_user.id} 已成功解除用户 {user_id} 的 ban 状态。")
+
+#     except TelegramBadRequest as e:
+#         # 如果用户未被 ban 或其他错误
+#         await message.reply(f"⚠️ {user_id} has not been banned")
+#         logger.error(f"解除用户 {user_id} 的 ban 状态时发生错误：{e}")
+#     except Exception as e:
+#         await message.reply(f"❌ An unknown error occurred while lifting the ban, please try again later.")
+#         logger.error(f"处理 /unban 命令时发生错误：{e}")
+
+@router.message(Command("unban"))
+async def unban_user(message: types.Message):
+    """解除特定用户的 ban 状态"""
+    try:
+        # 检查是否为允许使用该命令的管理员
+        if message.from_user.id not in ALLOWED_ADMIN_IDS:
+            await message.reply("❌ You do not have permission to use this command.")
+            return
+
+        # 提取命令中的用户 ID
+        command_parts = message.text.split()
+        if len(command_parts) < 2:
+            await message.reply("❓ Please provide the user ID who needs to be unbanned. For example: /unban 123456789")
+            return
+
+        user_id = int(command_parts[1])  # 从命令中获取目标用户 ID
+        chat_id = message.chat.id  # 当前群组 ID
+
+        # 检查用户是否在群组中
+        try:
+            member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            if member.status != "kicked":
+                # 如果用户未被 ban
+                if member.status in ["member", "administrator", "creator"]:
+                    await message.reply(f"⚠️ User {user_id} is currently in the group and is not banned.")
+                    return
+                else:
+                    # 其他状态（如已离开群组）
+                    await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+                    await message.reply(f"✅ User {user_id} has been unbanned and can rejoin the group.")
+                    return
+        except TelegramBadRequest:
+            # 如果用户不在群组或其他异常
+            logger.info(f"用户 {user_id} 不在群组中或状态异常，将继续解除 ban。")
+
+        # 尝试解除 ban
+        await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+        await message.reply(f"✅ User {user_id} has been successfully unbanned.")
+        logger.info(f"管理员 {message.from_user.id} 已成功解除用户 {user_id} 的 ban 状态。")
+
+    except TelegramBadRequest as e:
+        # 如果用户未被 ban 或其他错误
+        await message.reply(f"⚠️ {user_id} has not been banned or is invalid.")
+        logger.error(f"解除用户 {user_id} 的 ban 状态时发生错误：{e}")
+    except Exception as e:
+        await message.reply(f"❌ An unknown error occurred while lifting the ban, please try again later.")
+        logger.error(f"处理 /unban 命令时发生错误：{e}")
+
+@router.message(Command("getid"))
+async def get_user_id(message: types.Message):
+    """返回用户的 Telegram ID"""
+    user_id = message.from_user.id  # 获取发送者的用户 ID
+    full_name = message.from_user.full_name  # 获取发送者的全名
+    username = message.from_user.username  # 获取发送者的用户名（如果有）
+
+    response = (
+        f"✅ User ID：<code>{user_id}</code>\n"
+        f"👤 Name：{full_name}\n"
+    )
+    if username:
+        response += f"🔗 username：@{username}\n"
+
+    await message.reply(response, parse_mode="HTML")
+
 @router.chat_member()
 async def handle_chat_member_event(event: ChatMemberUpdated):
-    """统一处理 chat_member 事件"""
-
     try:
         # 获取事件相关信息
         chat_id = event.chat.id
@@ -378,9 +394,11 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
 
         # 定义 API URLs
         # welcome_msg_url = "http://127.0.0.1:5002/admin/telegram/social/welcome_msg"
-        welcome_msg_url = "http://172.25.183.151:4070/admin/telegram/social/welcome_msg"
+        welcome_msg_url = "http://172.31.91.67:4070/admin/telegram/social/welcome_msg"
         # social_url = "http://127.0.0.1:5002/admin/telegram/social/socials"
-        social_url = "http://172.25.183.151:4070/admin/telegram/social/socials"
+        social_url = "http://172.31.91.67:4070/admin/telegram/social/socials"
+        # welcome_msg_url = "http://172.25.183.151:4070/admin/telegram/social/welcome_msg"
+        # social_url = "http://172.25.183.151:4070/admin/telegram/social/socials"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         payload = {"verifyGroup": str(chat_id), "brand": "BYD", "type": "TELEGRAM"}
 
@@ -391,7 +409,7 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
         social_groups = set()
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(social_url, headers=headers) as response:
+                async with session.post(SOCIAL_API, headers=headers) as response:
                     if response.status == 200:
                         social_data = await response.json()
                         social_groups = {
@@ -408,7 +426,7 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
             # 如果是验证群，调用 welcome_msg_url 检查
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(welcome_msg_url, headers=headers, data=payload) as response:
+                    async with session.post(WELCOME_API, headers=headers, data=payload) as response:
                         logger.info(f"监测到用户加入群组，返回数据: {await response.json()}")
                         if response.status == 200:
                             # 判断是否为验证群
@@ -423,16 +441,58 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
             except Exception as e:
                 logger.error(f"调用验证群接口时出错: {e}")
             # 如果是验证群，发送欢迎消息
+            # if is_verification_group:
+            #     user_mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
+            #     welcome_message = welcome_message.replace("@{username}", user_mention)
+            #     await event.bot.send_message(chat_id=chat_id, text=welcome_message, parse_mode="HTML")
             if is_verification_group:
                 user_mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
+                # 替换 @{username} 占位符
                 welcome_message = welcome_message.replace("@{username}", user_mention)
-                await event.bot.send_message(chat_id=chat_id, text=welcome_message, parse_mode="HTML")
+
+                # 提取 referral link
+                referral_start = welcome_message.find("https://")
+                referral_end = welcome_message.find("Step 2", referral_start) if referral_start != -1 else -1
+                referral_link = None
+                if referral_start != -1:
+                    referral_link = (
+                        welcome_message[referral_start:referral_end].strip() if referral_end != -1 else welcome_message[referral_start:]
+                    )
+                    referral_link = referral_link.replace("</a>", "").replace("\n", "").strip()
+                if not referral_link:
+                    logger.error("Referral link 提取失败，跳过欢迎消息发送")
+                    return
+
+                # 构建按钮
+                # button = InlineKeyboardButton(text="Register Now", url=referral_link)
+                # button_markup = InlineKeyboardMarkup(inline_keyboard=[[button]])  # 确保 inline_keyboard 是二维数组
+                reply_markup = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="Get Started!", url=referral_link)]
+                    ]
+                )
+
+                # 图片路径
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(current_dir, "..", "pics", "FindUID.jpg")
+                image_file = FSInputFile(image_path)
+                try:
+                    # 发送图片和按钮
+                    await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=image_file,
+                        caption=welcome_message,
+                        parse_mode="HTML",
+                        reply_markup=reply_markup,
+                    )
+                    logger.info(f"发送欢迎图片和按钮给用户 {user_mention}")
+                except Exception as e:
+                    logger.error(f"发送图片失败: {e}")
 
             # 如果是资讯群，检查是否为验证通过的用户
             elif str(chat_id) in social_groups:
                 # verified_user = await is_user_verified(user_id)  # 检查是否已验证
                 verified_user = await get_verified_user(user_id, chat_id)
-                print(verified_user)
                 if not verified_user:
                     logger.warning(f"未验证用户 {user_id} 试图加入资讯群 {chat_id}，踢出...")
                     await bot.ban_chat_member(chat_id=chat_id, user_id=int(user_id))
@@ -477,7 +537,8 @@ async def send_to_specific_topic(message: types.Message):
             chat_id=group_chat_id,
             photo=image_file,
             caption=content,  # 圖片的文字說明
-            message_thread_id=topic_id
+            message_thread_id=topic_id,
+            parse_mode="HTML"
         )
 
         # 回應用戶
@@ -537,17 +598,120 @@ async def handle_api_request(request, bot: Bot):
         logger.error(f"API 请求处理失败: {e}")
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+async def handle_send_announcement(request: web.Request, *, bot: Bot):
+    try:
+        data = await request.json()
+        content = data.get("content")
+        image_url = data.get("image")
+
+        if not content:
+            return web.json_response({"status": "error", "message": "Missing 'content'"}, status=400)
+
+        # 認證（可選）
+        # auth = request.headers.get("Authorization", "")
+        # if not auth or auth != "Bearer your_api_key":
+        #     return web.json_response({"status": "error", "message": "Unauthorized"}, status=401)
+
+        # 呼叫 socials_url 獲取公告頻道資訊
+        socials_url = "http://172.25.183.151:4070/admin/telegram/social/socials"
+        # socials_url = "http://127.0.0.1:5002/admin/telegram/social/socials"
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        payload = {"brand": "BYD", "type": "TELEGRAM"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(SOCIAL_API, headers=headers, data=payload) as resp:
+                if resp.status != 200:
+                    return web.json_response({"status": "error", "message": "Failed to fetch social group info"}, status=500)
+                social_data = await resp.json()
+
+        results = []
+
+        async def send_to_channel(chat_id, topic_id):
+            try:
+                if image_url:
+                    temp_file_path = f"/tmp/temp_image_{chat_id}_{topic_id}.jpg"
+                    async with aiohttp.ClientSession() as img_session:
+                        async with img_session.get(image_url) as img_resp:
+                            if img_resp.status == 200:
+                                async with aiofiles.open(temp_file_path, "wb") as f:
+                                    await f.write(await img_resp.read())
+                                file = FSInputFile(temp_file_path)
+                                await asyncio.wait_for(bot.send_photo(
+                                    chat_id=chat_id,
+                                    photo=file,
+                                    caption=content.replace("<br>", "\n"),
+                                    message_thread_id=topic_id,
+                                    parse_mode="Markdown"
+                                ), timeout=5.0)
+                                os.remove(temp_file_path)
+                            else:
+                                raise Exception(f"Image fetch error {img_resp.status}")
+                else:
+                    await asyncio.wait_for(bot.send_message(
+                        chat_id=chat_id,
+                        # chat_id=-1002370802321,
+                        text=content.replace("<br>", "\n"),
+                        # message_thread_id=11,
+                        message_thread_id=topic_id,                        
+                        parse_mode="Markdown"
+                    ), timeout=5.0)
+
+                return {"chat_id": chat_id, "topic_id": topic_id, "status": "sent"}
+
+            except asyncio.TimeoutError:
+                return {"chat_id": chat_id, "topic_id": topic_id, "status": "failed", "error": "Timeout while sending to Telegram"}
+            except Exception as e:
+                return {"chat_id": chat_id, "topic_id": topic_id, "status": "failed", "error": str(e)}
+
+        # 準備所有待發送的任務
+        tasks = []
+        for item in social_data.get("data", []):
+            chat_id = item.get("socialGroup")
+            for chat in item.get("chats", []):
+                if chat.get("name") == "Announcements" and chat.get("enable"):
+                    topic_id = chat.get("chatId")
+                    tasks.append(send_to_channel(chat_id, topic_id))
+
+        # 並行發送
+        results = await asyncio.gather(*tasks)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                discord_announcement_url = "http://172.31.91.89:5011/api/discord/announcement"
+                # discord_announcement_url = "http://127.0.0.1:5011/api/discord/announcement"
+                dc_payload = {"content": content, "image": image_url}
+                async with session.post(DISCORD_BOT, json=dc_payload) as dc_resp:
+                    dc_resp_json = await dc_resp.json()
+                    logger.info(f"[TG] Discord 發送結果: {dc_resp.status} - {dc_resp_json}")
+        except Exception as e:
+            logger.error(f"[TG] 呼叫 Discord 發送公告時出錯: {e}")
+
+        return web.json_response({"status": "success", "message": "Announcement dispatched.", "results": results}, status=200)
+
+    except Exception as e:
+        logger.error(f"Error in handle_send_announcement: {e}")
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
 async def start_aiohttp_server(bot: Bot):
     """启动 HTTP API 服务器"""
     app = web.Application()
     app.router.add_get("/api/get_member_count", lambda request: handle_api_request(request, bot))
+    app.router.add_post("/api/send_announcement", partial(handle_send_announcement, bot=bot))
+    app.router.add_post("/api/send_copy_signal", partial(handle_send_copy_signal, bot=bot))
+    
+    # 新增的 API 路由
+    app.router.add_post("/api/completed_trade", partial(handle_trade_summary, bot=bot))
+    app.router.add_post("/api/scalp_update", partial(handle_scalp_update, bot=bot))
+    app.router.add_post("/api/report/holdings", partial(handle_holding_report, bot=bot))
+    app.router.add_post("/api/report/weekly", partial(handle_weekly_report, bot=bot))
 
     runner = web.AppRunner(app)
     await runner.setup()
 
     # 使用 eth0 的 IP 地址绑定接口
-    target_host = "172.25.183.177"  # 绑定到服务器的实际 IP 地址
-    target_port = 5010             # 可自定义的端口
+    target_host = PRODUCT_IP
+    # target_host = "0.0.0.0"
+    target_port = 5010
     site = web.TCPSite(runner, host=target_host, port=target_port)
     await site.start()
 
@@ -556,19 +720,23 @@ async def start_aiohttp_server(bot: Bot):
 
 async def periodic_task(bot: Bot):
     """周期性任务，每30秒检查未发布文章并发布"""
-    posts_url = "http://172.25.183.139:5003/bot/posts/list?status=0"
-    update_url = "http://172.25.183.139:5003/bot/posts/edit"
+    posts_url = "https://sp.signalcms.com/bot/posts/list?is_sent_tg=0"
+    update_url = "https://sp.signalcms.com/bot/posts/edit"
+
     # posts_url = "http://127.0.0.1:5003/bot/posts/list?status=0"
     # update_url = "http://127.0.0.1:5003/bot/posts/edit"
+
+    # posts_url = "http://172.25.183.139:5003/bot/posts/list?is_sent_tg=0"
+    # update_url = "http://172.25.183.139:5003/bot/posts/edit"
     headers = {"Content-Type": "application/json"}
     # payload = {"status": 0}  # 未发布文章的状态
 
     try:
         while True:
-            posts_list = await fetch_unpublished_posts(posts_url, headers)
+            posts_list = await fetch_unpublished_posts(MESSAGE_API_URL, headers)
 
             if posts_list:
-                await publish_posts(bot, posts_list, update_url, headers)
+                await publish_posts(bot, posts_list, UPDATE_MESSAGE_API_URL, headers)
 
             # 将 sleep 逻辑分解为更小的间隔，响应性更好
             for _ in range(30):  # 分解成 30 次 1 秒的 sleep
@@ -580,33 +748,60 @@ async def periodic_task(bot: Bot):
 async def main():
     """主函数"""
     try:
+        logger.info("开始启动 Telegram Bot...")
+        
+        logger.info("加载活跃群组...")
         await load_active_groups()
+        
+        logger.info("设置路由器...")
         dp.include_router(router)
-
+        
+        logger.info("创建心跳任务...")
         heartbeat_task = asyncio.create_task(heartbeat(bot, interval=600))
 
-        # 启动周期性任务
+        logger.info("创建周期性任务...")
         periodic_task_instance = asyncio.create_task(periodic_task(bot))
 
-        # 启动 HTTP API 服务器
-        # http_server_runner, _ = await start_aiohttp_server(bot)
+        logger.info("启动 HTTP API 服务器...")
+        http_server_runner, _ = await start_aiohttp_server(bot)
 
-        # 启动 Telegram bot 轮询
+        logger.info("启动 Telegram bot 轮询...")
         polling_task = asyncio.create_task(dp.start_polling(bot))
 
-        # 等待任务完成（不再显式等待信号）
-        await asyncio.gather(heartbeat_task, periodic_task_instance, polling_task)
-        # await asyncio.gather(polling_task)
+        logger.info("所有任务已启动，等待运行...")
+        
+        # 等待所有任务（除了 HTTP 服务器，它已经在运行）
+        await asyncio.gather(
+            heartbeat_task, 
+            periodic_task_instance, 
+            polling_task,
+            return_exceptions=True
+        )
 
     except Exception as e:
         logger.error(f"主任务执行过程中出错: {e}")
+        import traceback
+        logger.error(f"详细错误信息: {traceback.format_exc()}")
     finally:
+        logger.info("开始清理资源...")
+        
+        # 清理 HTTP 服务器
+        if 'http_server_runner' in locals():
+            try:
+                await http_server_runner.cleanup()
+                logger.info("HTTP 服务器已清理")
+            except Exception as e:
+                logger.error(f"清理 HTTP 服务器时出错: {e}")
+        
         # 取消所有未完成的任务
         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        logger.info(f"正在取消未完成的任务: {tasks}")
+        logger.info(f"正在取消未完成的任务: {len(tasks)} 个")
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
         logger.info("所有任务已成功取消")
 
 if __name__ == "__main__":
