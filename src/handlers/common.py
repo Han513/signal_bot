@@ -79,27 +79,48 @@ async def send_telegram_message(bot: Bot, chat_id: int, topic_id: int,
     Returns:
         bool: 發送是否成功
     """
-    try:
-        if photo_path:
-            photo = FSInputFile(photo_path)
-            await bot.send_photo(
-                chat_id=chat_id,
-                message_thread_id=topic_id,
-                photo=photo,
-                caption=text,
-                parse_mode=parse_mode
-            )
-        else:
-            await bot.send_message(
-                chat_id=chat_id,
-                message_thread_id=topic_id,
-                text=text,
-                parse_mode=parse_mode
-            )
-        return True
-    except Exception as e:
-        logger.error(f"發送 Telegram 消息失敗: {e}")
-        return False
+    max_retries = 2
+    retry_delay = 1.0
+    
+    for attempt in range(max_retries + 1):
+        try:
+            if photo_path:
+                # 驗證圖片文件是否存在且有效
+                if not os.path.exists(photo_path):
+                    logger.error(f"圖片文件不存在: {photo_path}")
+                    return False
+                
+                if os.path.getsize(photo_path) == 0:
+                    logger.error(f"圖片文件為空: {photo_path}")
+                    return False
+                
+                photo = FSInputFile(photo_path)
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    message_thread_id=topic_id,
+                    photo=photo,
+                    caption=text,
+                    parse_mode=parse_mode
+                )
+            else:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    message_thread_id=topic_id,
+                    text=text,
+                    parse_mode=parse_mode
+                )
+            return True
+            
+        except Exception as e:
+            if attempt < max_retries:
+                logger.warning(f"發送 Telegram 消息失敗 (嘗試 {attempt + 1}/{max_retries + 1}): {e}")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # 指數退避
+            else:
+                logger.error(f"發送 Telegram 消息最終失敗: {e}")
+                return False
+    
+    return False
 
 async def send_discord_message(discord_webhook_url: str, data: dict) -> bool:
     """
@@ -164,93 +185,140 @@ def generate_trader_summary_image(trader_url, trader_name, pnl_percentage, pnl):
     """
     生成交易員統計圖片
     """
-    # 字體設定與尺寸
-    number_font_size = 100
-    label_font_size = 45
-    title_font_size = 70
-    avatar_size = 180
+    import time
+    import uuid
+    
+    # 重試機制
+    max_retries = 2
+    retry_delay = 0.5
+    
+    for attempt in range(max_retries + 1):
+        try:
+            # 字體設定與尺寸
+            number_font_size = 100
+            label_font_size = 45
+            title_font_size = 70
+            avatar_size = 180
+            
+            # 使用唯一文件名避免衝突
+            unique_id = str(uuid.uuid4())[:8]
+            temp_path = f"/tmp/trader_summary_full_{unique_id}.png"
 
-    # 背景圖
-    bg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'pics', 'copy_trade.png'))
-    if os.path.exists(bg_path):
-        img = Image.open(bg_path).convert('RGB')
-    else:
-        img = Image.new('RGB', (1200, 675), color=(0, 0, 0))
-    draw = ImageDraw.Draw(img)
+            # 背景圖
+            bg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'pics', 'copy_trade.png'))
+            if os.path.exists(bg_path):
+                img = Image.open(bg_path).convert('RGB')
+            else:
+                img = Image.new('RGB', (1200, 675), color=(0, 0, 0))
+            draw = ImageDraw.Draw(img)
 
-    # 頭像處理
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(trader_url, timeout=5, headers=headers)
-        response.raise_for_status()
-        avatar = Image.open(BytesIO(response.content)).resize((avatar_size, avatar_size)).convert("RGBA")
-    except Exception as e:
-        logger.warning(f"頭像下載失敗: {e}, 使用預設頭像")
-        avatar = Image.new('RGBA', (avatar_size, avatar_size), (200, 200, 200, 255))
+            # 頭像處理
+            try:
+                headers = {"User-Agent": "Mozilla/5.0"}
+                response = requests.get(trader_url, timeout=10, headers=headers)  # 增加超時時間
+                response.raise_for_status()
+                avatar = Image.open(BytesIO(response.content)).resize((avatar_size, avatar_size)).convert("RGBA")
+            except Exception as e:
+                logger.warning(f"頭像下載失敗: {e}, 使用預設頭像")
+                avatar = Image.new('RGBA', (avatar_size, avatar_size), (200, 200, 200, 255))
 
-    mask = Image.new('L', (avatar_size, avatar_size), 0)
-    ImageDraw.Draw(mask).ellipse((0, 0, avatar_size, avatar_size), fill=255)
-    avatar.putalpha(mask)
-    avatar_x, avatar_y = 100, 150
-    img.paste(avatar, (avatar_x, avatar_y), avatar)
+            mask = Image.new('L', (avatar_size, avatar_size), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, avatar_size, avatar_size), fill=255)
+            avatar.putalpha(mask)
+            avatar_x, avatar_y = 100, 150
+            img.paste(avatar, (avatar_x, avatar_y), avatar)
 
-    # 字體載入
-    font_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'text'))
-    bold_font_path = os.path.join(font_dir, 'BRHendrix-Bold-BF6556d1b5459d3.otf')
-    noto_bold_font_path = os.path.join(font_dir, 'NotoSansSC-Bold.ttf')
+            # 字體載入
+            font_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'text'))
+            bold_font_path = os.path.join(font_dir, 'BRHendrix-Bold-BF6556d1b5459d3.otf')
+            noto_bold_font_path = os.path.join(font_dir, 'NotoSansSC-Bold.ttf')
 
-    try:
-        number_font = ImageFont.truetype(bold_font_path, number_font_size)
-        label_font = ImageFont.truetype(noto_bold_font_path, label_font_size)
-        title_font = ImageFont.truetype(
-            bold_font_path if is_all_english(trader_name) else noto_bold_font_path,
-            title_font_size
-        )
-    except Exception as e:
-        logger.warning(f"字體載入失敗: {e}")
-        return None
+            try:
+                number_font = ImageFont.truetype(bold_font_path, number_font_size)
+                label_font = ImageFont.truetype(noto_bold_font_path, label_font_size)
+                title_font = ImageFont.truetype(
+                    bold_font_path if is_all_english(trader_name) else noto_bold_font_path,
+                    title_font_size
+                )
+            except Exception as e:
+                logger.warning(f"字體載入失敗: {e}")
+                # 使用預設字體
+                try:
+                    number_font = ImageFont.load_default()
+                    label_font = ImageFont.load_default()
+                    title_font = ImageFont.load_default()
+                except Exception as e2:
+                    logger.error(f"連預設字體都無法載入: {e2}")
+                    if attempt < max_retries:
+                        continue
+                    return None
 
-    # 名稱
-    name_x = avatar_x + avatar_size + 30
-    if is_all_english(trader_name):
-        # 英文名往下微調
-        name_y = avatar_y + (avatar_size - title_font_size) // 2 + 13
-    else:
-        # 中文名維持原本
-        name_y = avatar_y + (avatar_size - title_font_size) // 2
-    draw.text((name_x, name_y), trader_name, font=title_font, fill=(255, 255, 255))
+            # 名稱
+            name_x = avatar_x + avatar_size + 30
+            if is_all_english(trader_name):
+                # 英文名往下微調
+                name_y = avatar_y + (avatar_size - title_font_size) // 2 + 13
+            else:
+                # 中文名維持原本
+                name_y = avatar_y + (avatar_size - title_font_size) // 2
+            draw.text((name_x, name_y), trader_name, font=title_font, fill=(255, 255, 255))
 
-    # 數值處理
-    try:
-        pnl_perc_value = float(pnl_percentage) * 100
-    except Exception:
-        pnl_perc_value = 0.0
-    is_positive = pnl_perc_value >= 0
-    color = (0, 191, 99) if is_positive else (237, 29, 36)
+            # 數值處理
+            try:
+                pnl_perc_value = float(pnl_percentage) * 100
+            except Exception:
+                pnl_perc_value = 0.0
+            is_positive = pnl_perc_value >= 0
+            color = (0, 191, 99) if is_positive else (237, 29, 36)
 
-    roi_text = f"{format_float(pnl_perc_value)}%"
-    try:
-        pnl_val = float(pnl)
-    except Exception:
-        pnl_val = 0.0
-    pnl_text = f"${format_float(abs(pnl_val))}"
-    if not is_positive:
-        pnl_text = f"-{pnl_text}"
+            roi_text = f"{format_float(pnl_perc_value)}%"
+            try:
+                pnl_val = float(pnl)
+            except Exception:
+                pnl_val = 0.0
+            pnl_text = f"${format_float(abs(pnl_val))}"
+            if not is_positive:
+                pnl_text = f"-{pnl_text}"
 
-    # ROI & PNL位置（水平對齊）
-    roi_x, roi_y = 100, 415
-    pnl_x, pnl_y = 550, 415
+            # ROI & PNL位置（水平對齊）
+            roi_x, roi_y = 100, 415
+            pnl_x, pnl_y = 550, 415
 
-    draw.text((roi_x, roi_y), roi_text, font=number_font, fill=color)
-    draw.text((pnl_x, pnl_y), pnl_text, font=number_font, fill=color)
+            draw.text((roi_x, roi_y), roi_text, font=number_font, fill=color)
+            draw.text((pnl_x, pnl_y), pnl_text, font=number_font, fill=color)
 
-    draw.text((roi_x, roi_y + number_font_size + 5), "7D ROI", font=label_font, fill=(200, 200, 200))
-    draw.text((pnl_x, pnl_y + number_font_size + 5), "7D PNL", font=label_font, fill=(200, 200, 200))
+            draw.text((roi_x, roi_y + number_font_size + 5), "7D ROI", font=label_font, fill=(200, 200, 200))
+            draw.text((pnl_x, pnl_y + number_font_size + 5), "7D PNL", font=label_font, fill=(200, 200, 200))
 
-    # 輸出圖片
-    temp_path = "/tmp/trader_summary_full.png"
-    img.save(temp_path, quality=95)
-    return temp_path
+            # 輸出圖片
+            try:
+                img.save(temp_path, quality=95, format='PNG')
+                # 驗證生成的圖片文件
+                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    # 添加小延遲確保文件完全寫入
+                    time.sleep(0.1)
+                    return temp_path
+                else:
+                    logger.error("生成的圖片文件無效或為空")
+                    if attempt < max_retries:
+                        continue
+                    return None
+            except Exception as e:
+                logger.error(f"保存圖片失敗: {e}")
+                if attempt < max_retries:
+                    continue
+                return None
+                
+        except Exception as e:
+            if attempt < max_retries:
+                logger.warning(f"圖片生成失敗 (嘗試 {attempt + 1}/{max_retries + 1}): {e}")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # 指數退避
+            else:
+                logger.error(f"圖片生成最終失敗: {e}")
+                return None
+    
+    return None
 
 async def handle_async_task(task_func, *args, **kwargs):
     """

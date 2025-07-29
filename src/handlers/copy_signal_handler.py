@@ -45,10 +45,11 @@ async def handle_send_copy_signal(request: web.Request, *, bot: Bot):
 
 def validate_copy_signal(data: dict) -> None:
     """驗證 copy signal 請求資料，失敗時拋出 ValueError。"""
+
     required_fields = {
         "trader_uid", "trader_name", "trader_pnl", "trader_pnlpercentage",
         "trader_detail_url", "pair", "base_coin", "quote_coin",
-        "pair_leverage", "pair_type", "price", "amount", "time", "trader_url",
+        "pair_leverage", "pair_type", "price", "time", "trader_url",
         "pair_side", "pair_margin_type"
     }
 
@@ -129,11 +130,11 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             margin_type_str = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
 
             caption = (
-                f"⚡️{data['trader_name']} New Trade Open\n\n"
-                f"📢{data['pair']} {margin_type_str}{data['pair_leverage']}X\n\n"
+                f"⚡️**{data['trader_name']}** New Trade Open\n\n"
+                f"📢{data['pair']} {margin_type_str} {data['pair_leverage']}X\n\n"
                 f"⏰Time: {formatted_time} (UTC+0)\n"
                 f"➡️Direction: {pair_type_str} {pair_side_str}\n"
-                f"🎯Entry Price: {data['price']}"
+                f"🎯Entry Price: ${data['price']}"
             )
             
             if jump == "1":

@@ -258,7 +258,7 @@ async def handle_verify_command(message: types.Message):
                             text=response_data["data"],
                             parse_mode="HTML"
                         )
-                        asyncio.create_task(delete_message_after_delay(response_message.chat.id, response_message.message_id, 10))
+                        asyncio.create_task(delete_message_after_delay(response_message.chat.id, response_message.message_id, 60))
                         logger.info(f"消息已发送并将在 10 分钟后自动删除，消息 ID: {response_message.message_id}")
 
                     except Exception as e:
@@ -612,9 +612,6 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
         # if not auth or auth != "Bearer your_api_key":
         #     return web.json_response({"status": "error", "message": "Unauthorized"}, status=401)
 
-        # 呼叫 socials_url 獲取公告頻道資訊
-        socials_url = "http://172.25.183.151:4070/admin/telegram/social/socials"
-        # socials_url = "http://127.0.0.1:5002/admin/telegram/social/socials"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         payload = {"brand": "BYD", "type": "TELEGRAM"}
 
@@ -677,8 +674,6 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
 
         try:
             async with aiohttp.ClientSession() as session:
-                discord_announcement_url = "http://172.31.91.89:5011/api/discord/announcement"
-                # discord_announcement_url = "http://127.0.0.1:5011/api/discord/announcement"
                 dc_payload = {"content": content, "image": image_url}
                 async with session.post(DISCORD_BOT, json=dc_payload) as dc_resp:
                     dc_resp_json = await dc_resp.json()
@@ -697,9 +692,8 @@ async def start_aiohttp_server(bot: Bot):
     app = web.Application()
     app.router.add_get("/api/get_member_count", lambda request: handle_api_request(request, bot))
     app.router.add_post("/api/send_announcement", partial(handle_send_announcement, bot=bot))
-    app.router.add_post("/api/send_copy_signal", partial(handle_send_copy_signal, bot=bot))
     
-    # 新增的 API 路由
+    app.router.add_post("/api/send_copy_signal", partial(handle_send_copy_signal, bot=bot))
     app.router.add_post("/api/completed_trade", partial(handle_trade_summary, bot=bot))
     app.router.add_post("/api/scalp_update", partial(handle_scalp_update, bot=bot))
     app.router.add_post("/api/report/holdings", partial(handle_holding_report, bot=bot))
@@ -720,16 +714,8 @@ async def start_aiohttp_server(bot: Bot):
 
 async def periodic_task(bot: Bot):
     """周期性任务，每30秒检查未发布文章并发布"""
-    posts_url = "https://sp.signalcms.com/bot/posts/list?is_sent_tg=0"
-    update_url = "https://sp.signalcms.com/bot/posts/edit"
 
-    # posts_url = "http://127.0.0.1:5003/bot/posts/list?status=0"
-    # update_url = "http://127.0.0.1:5003/bot/posts/edit"
-
-    # posts_url = "http://172.25.183.139:5003/bot/posts/list?is_sent_tg=0"
-    # update_url = "http://172.25.183.139:5003/bot/posts/edit"
     headers = {"Content-Type": "application/json"}
-    # payload = {"status": 0}  # 未发布文章的状态
 
     try:
         while True:

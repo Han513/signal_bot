@@ -135,10 +135,10 @@ def format_scalp_update_text(data: dict, formatted_time: str, include_link: bool
     is_update = has_previous_tp or has_previous_sl
     
     # 格式化價格
-    tp_price = format_float(data.get("tp_price", "")) if data.get("tp_price") else ""
-    sl_price = format_float(data.get("sl_price", "")) if data.get("sl_price") else ""
-    previous_tp_price = format_float(data.get("previous_tp_price", "")) if data.get("previous_tp_price") else ""
-    previous_sl_price = format_float(data.get("previous_sl_price", "")) if data.get("previous_sl_price") else ""
+    tp_price = str(data.get("tp_price", "")) if data.get("tp_price") else ""
+    sl_price = str(data.get("sl_price", "")) if data.get("sl_price") else ""
+    previous_tp_price = str(data.get("previous_tp_price", "")) if data.get("previous_tp_price") else ""
+    previous_sl_price = str(data.get("previous_sl_price", "")) if data.get("previous_sl_price") else ""
     
     if is_update:
         # 更新操作文案

@@ -131,9 +131,9 @@ def format_trade_summary_text(data: dict, include_link: bool = True) -> str:
     margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
     
     # 格式化數值
-    entry_price = format_float(data.get("entry_price", 0))
-    exit_price = format_float(data.get("exit_price", 0))
-    realized_pnl = format_float(data.get("realized_pnl_percentage", 0))
+    entry_price = str(data.get("entry_price", 0))
+    exit_price = str(data.get("exit_price", 0))
+    realized_pnl = format_float(float(data.get("realized_pnl_percentage", 0)) * 100)
     leverage = format_float(data.get("pair_leverage", 0))
     
     # 格式化時間
@@ -141,9 +141,9 @@ def format_trade_summary_text(data: dict, include_link: bool = True) -> str:
     
     text = (
         f"⚡️{data.get('trader_name', 'Trader')} Close Position\n\n"
-        f"📢{data.get('pair', '')} {margin_type}{leverage}X\n"
+        f"📢{data.get('pair', '')} {margin_type} {leverage}X\n"
         f"⏰Time: {formatted_time} (UTC+0)\n"
-        f"➡️Direction: {pair_side}\n"
+        f"➡️Direction: Close {pair_side}\n"
         f"🙌🏻ROI: {realized_pnl}%\n"
         f"🎯Entry Price: ${entry_price}\n"
         f"💰Exit Price: ${exit_price}"
@@ -188,9 +188,9 @@ def generate_trade_summary_image(data: dict) -> str:
             return None
         
         # 格式化數值
-        realized_pnl = format_float(data.get("realized_pnl_percentage", 0))
-        entry_price = format_float(data.get("entry_price", 0))
-        exit_price = format_float(data.get("exit_price", 0))
+        realized_pnl = format_float(float(data.get("realized_pnl_percentage", 0)) * 100)
+        entry_price = str(data.get("entry_price", 0))
+        exit_price = str(data.get("exit_price", 0))
         leverage = format_float(data.get("pair_leverage", 0))
         
         # 判斷盈虧顏色
