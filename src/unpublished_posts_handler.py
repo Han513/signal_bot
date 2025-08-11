@@ -103,7 +103,7 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
         
         # 查找匹配的群组和主题
         matching_chats = [
-            {"chatId": social["socialGroup"], "topicId": chat["chatId"], "language": chat.get("lang", "en")}
+            {"chatId": social["socialGroup"], "topicId": chat["chatId"], "lang": social.get("lang", "en_US")}
             for social in social_chats
             for chat in social.get("chats", [])
             if chat["enable"] and chat["name"] == normalized_topic
@@ -115,13 +115,39 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
 
         # 收集發送結果
         send_results = []
-        temp_files = []
-
+        temp_file_path = None
+        image_file = None
+        
+        # 如果有圖片，先下載一次
+        if image:
+            if not image.startswith("http"):
+                # image = f"https://sp.signalcms.com{image}"
+                image = f"http://172.25.183.139:5003{image}"
+            temp_file_path = f"/tmp/image_{post_id}.jpg"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image) as img_response:
+                        if img_response.status == 200:
+                            async with aiofiles.open(temp_file_path, "wb") as f:
+                                await f.write(await img_response.read())
+                            logger.info(f"Image downloaded successfully: {temp_file_path}")
+                            image_file = FSInputFile(temp_file_path)
+                        else:
+                            logger.error(f"Failed to download image: {image}")
+                            # 如果圖片下載失敗，記錄錯誤但繼續處理文字消息
+                            send_results.append({"success": False, "error": f"Image download failed: {image}"})
+            except Exception as e:
+                logger.error(f"Error downloading image: {e}")
+                send_results.append({"success": False, "error": f"Image download error: {e}"})
+        
+        logger.info(f"matching_chats: {matching_chats}")
         # 遍历所有匹配的 chatId 和 topic_id，发送消息
         for chat in matching_chats:
             chat_id = chat.get("chatId")
             topic_id = chat.get("topicId")
-            lang = chat.get("lang", "en")
+            lang = chat.get("lang", "en_US")
+
+            logger.info(f"chat_id: {chat_id}, topic_id: {topic_id}, lang: {lang}")
             
             if not chat_id or not topic_id:
                 logger.warning(f"未找到 chatId 或 topicId，跳过: {chat}")
@@ -129,38 +155,21 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
                 
             try:
                 content = get_multilingual_content(post, lang)
-                temp_file_path = None
                 
-                if image:
-                    if not image.startswith("http"):
-                        # image = f"https://sp.signalcms.com{image}"
-                        image = f"https://gmgn.ai/static/avator/107.png"
-                    temp_file_path = f"/tmp/image_{post_id}_{chat_id}_{topic_id}.jpg"
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(image) as img_response:
-                            if img_response.status == 200:
-                                async with aiofiles.open(temp_file_path, "wb") as f:
-                                    await f.write(await img_response.read())
-                                logger.info(f"Image downloaded successfully: {temp_file_path}")
-                                temp_files.append(temp_file_path)
-                            else:
-                                logger.error(f"Failed to download image: {image}")
-                                send_results.append({"success": False, "error": f"Image download failed: {image}"})
-                                continue
-                    image_file = FSInputFile(temp_file_path)
+                if image and image_file:
                     await bot.send_photo(
                         chat_id=chat_id,
                         photo=image_file,
                         caption=content,
                         message_thread_id=topic_id,
-                        parse_mode="MarkdownV2"
+                        parse_mode="HTML"
                     )
                 else:
                     await bot.send_message(
                         chat_id=chat_id,
                         text=content,
                         message_thread_id=topic_id,
-                        parse_mode="MarkdownV2"
+                        parse_mode="HTML"
                     )
                     
                 logger.info(f"成功发送文章到 Chat ID: {chat_id} 的主题 ID: {topic_id}")
@@ -170,9 +179,10 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
                 logger.error(f"发送文章到 Chat ID {chat_id} 的主题 ID {topic_id} 失败: {e}")
                 send_results.append({"success": False, "error": str(e), "chat_id": chat_id, "topic_id": topic_id})
 
-        for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
+        # 清理臨時文件
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            logger.info(f"已清理臨時文件: {temp_file_path}")
 
         successful_sends = [r for r in send_results if r["success"]]
         failed_sends = [r for r in send_results if not r["success"]]

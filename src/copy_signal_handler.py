@@ -118,7 +118,7 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
                     and str(chat.get("traderUid")) == trader_uid
                 ):
                     topic_id = chat.get("chatId")
-                    jump = str(chat.get("jump", "1"))
+                    jump = str(chat.get("jump", "0"))
                     if chat_id and topic_id:
                         push_targets.append((chat_id, int(topic_id), jump))
 

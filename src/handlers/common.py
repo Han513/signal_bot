@@ -12,12 +12,48 @@ from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 from datetime import datetime, timezone
+import uuid
+import hashlib
+import time
 
 load_dotenv()
 SOCIAL_API = os.getenv("SOCIAL_API")
 DISCORD_BOT = os.getenv("DISCORD_BOT")
 
 logger = logging.getLogger(__name__)
+
+# 添加图片生成锁，防止并发冲突
+_image_generation_lock = asyncio.Lock()
+
+# 全局去重缓存，用于防止重复推送
+_message_dedup_cache = {}
+_task_dedup_cache = {}
+
+# 清理过期缓存的任务
+async def cleanup_dedup_cache():
+    """清理过期的去重缓存"""
+    current_time = time.time()
+    expired_keys = []
+    
+    # 清理消息缓存（5分钟过期）
+    for key, (timestamp, _) in _message_dedup_cache.items():
+        if current_time - timestamp > 300:  # 5分钟
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del _message_dedup_cache[key]
+    
+    # 清理任务缓存（1分钟过期）
+    expired_task_keys = []
+    for key, (timestamp, _) in _task_dedup_cache.items():
+        if current_time - timestamp > 60:  # 1分钟
+            expired_task_keys.append(key)
+    
+    for key in expired_task_keys:
+        del _task_dedup_cache[key]
+    
+    if expired_keys or expired_task_keys:
+        logger.debug(f"清理了 {len(expired_keys)} 个消息缓存和 {len(expired_task_keys)} 个任务缓存")
 
 async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
     """
@@ -52,7 +88,7 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
                     and str(chat.get("traderUid")) == str(trader_uid)
                 ):
                     topic_id = chat.get("chatId")
-                    jump = str(chat.get("jump", "1"))
+                    jump = str(chat.get("jump", "0"))
                     if chat_id and topic_id:
                         push_targets.append((chat_id, int(topic_id), jump))
         
@@ -64,7 +100,7 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
 
 async def send_telegram_message(bot: Bot, chat_id: int, topic_id: int, 
                               text: str = None, photo_path: str = None, 
-                              parse_mode: str = "Markdown") -> bool:
+                              parse_mode: str = "Markdown", trader_uid: str = None) -> bool:
     """
     發送 Telegram 消息
     
@@ -75,10 +111,18 @@ async def send_telegram_message(bot: Bot, chat_id: int, topic_id: int,
         text: 文本內容
         photo_path: 圖片路徑
         parse_mode: 解析模式
+        trader_uid: 交易員UID，用於去重
     
     Returns:
         bool: 發送是否成功
     """
+    # 消息去重检查
+    if trader_uid and text:
+        message_hash = generate_message_hash(trader_uid, text, chat_id, topic_id)
+        if is_duplicate_message(message_hash):
+            logger.info(f"跳过重复消息发送: trader_uid={trader_uid}, chat_id={chat_id}, topic_id={topic_id}")
+            return True  # 返回True表示"成功"跳过重复消息
+    
     max_retries = 2
     retry_delay = 1.0
     
@@ -181,12 +225,86 @@ def is_all_english(s):
     except UnicodeEncodeError:
         return False
 
+def generate_message_hash(trader_uid: str, content: str, chat_id: int, topic_id: int) -> str:
+    """生成消息的唯一哈希值"""
+    message_data = f"{trader_uid}:{content}:{chat_id}:{topic_id}"
+    return hashlib.md5(message_data.encode('utf-8')).hexdigest()
+
+def generate_task_hash(func_name: str, *args, **kwargs) -> str:
+    """生成任务的唯一哈希值"""
+    # 提取关键参数用于去重
+    key_parts = [func_name]
+    
+    # 对于持仓报告，使用 trader_uid 和 infos 内容作为去重键
+    if func_name == "process_holding_report_list":
+        if args and len(args) > 1:
+            data_raw = kwargs.get('data_raw') or args[1] if len(args) > 1 else None
+            if data_raw:
+                # 提取所有 trader_uid 和 infos 的关键信息
+                trader_keys = []
+                for trader in data_raw:
+                    trader_uid = str(trader.get("trader_uid", ""))
+                    infos = trader.get("infos", [])
+                    # 为每个 info 生成简化的键
+                    info_keys = []
+                    for info in infos:
+                        info_key = f"{info.get('pair', '')}:{info.get('entry_price', '')}:{info.get('current_price', '')}"
+                        info_keys.append(info_key)
+                    trader_keys.append(f"{trader_uid}:{','.join(sorted(info_keys))}")
+                key_parts.extend(sorted(trader_keys))
+    
+    task_data = ":".join(str(part) for part in key_parts)
+    return hashlib.md5(task_data.encode('utf-8')).hexdigest()
+
+def is_duplicate_message(message_hash: str) -> bool:
+    """检查是否为重复消息"""
+    current_time = time.time()
+    
+    # 清理过期缓存
+    expired_keys = []
+    for key, (timestamp, _) in _message_dedup_cache.items():
+        if current_time - timestamp > 300:  # 5分钟过期
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del _message_dedup_cache[key]
+    
+    # 检查是否已存在
+    if message_hash in _message_dedup_cache:
+        logger.warning(f"检测到重复消息，跳过发送: {message_hash}")
+        return True
+    
+    # 添加到缓存
+    _message_dedup_cache[message_hash] = (current_time, True)
+    return False
+
+def is_duplicate_task(task_hash: str) -> bool:
+    """检查是否为重复任务"""
+    current_time = time.time()
+    
+    # 清理过期缓存
+    expired_keys = []
+    for key, (timestamp, _) in _task_dedup_cache.items():
+        if current_time - timestamp > 60:  # 1分钟过期
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del _task_dedup_cache[key]
+    
+    # 检查是否已存在
+    if task_hash in _task_dedup_cache:
+        logger.warning(f"检测到重复任务，跳过执行: {task_hash}")
+        return True
+    
+    # 添加到缓存
+    _task_dedup_cache[task_hash] = (current_time, True)
+    return False
+
 def generate_trader_summary_image(trader_url, trader_name, pnl_percentage, pnl):
     """
-    生成交易員統計圖片
+    生成交易員統計圖片 - 支持并发安全
     """
     import time
-    import uuid
     
     # 重試機制
     max_retries = 2
@@ -207,7 +325,8 @@ def generate_trader_summary_image(trader_url, trader_name, pnl_percentage, pnl):
             # 背景圖
             bg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'pics', 'copy_trade.png'))
             if os.path.exists(bg_path):
-                img = Image.open(bg_path).convert('RGB')
+                # 创建背景图的副本，避免并发修改
+                img = Image.open(bg_path).convert('RGB').copy()
             else:
                 img = Image.new('RGB', (1200, 675), color=(0, 0, 0))
             draw = ImageDraw.Draw(img)
@@ -293,10 +412,15 @@ def generate_trader_summary_image(trader_url, trader_name, pnl_percentage, pnl):
             # 輸出圖片
             try:
                 img.save(temp_path, quality=95, format='PNG')
+                
+                # 清理图像对象
+                img.close()
+                
                 # 驗證生成的圖片文件
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     # 添加小延遲確保文件完全寫入
                     time.sleep(0.1)
+                    logger.info(f"成功生成交易员统计图片: {temp_path}")
                     return temp_path
                 else:
                     logger.error("生成的圖片文件無效或為空")
@@ -320,6 +444,20 @@ def generate_trader_summary_image(trader_url, trader_name, pnl_percentage, pnl):
     
     return None
 
+async def generate_trader_summary_image_async(trader_url, trader_name, pnl_percentage, pnl):
+    """异步生成交易员统计图片，使用锁确保线程安全"""
+    async with _image_generation_lock:
+        return generate_trader_summary_image(trader_url, trader_name, pnl_percentage, pnl)
+
+async def cleanup_temp_image(image_path: str):
+    """清理临时图片文件"""
+    try:
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+            logger.debug(f"已清理临时图片: {image_path}")
+    except Exception as e:
+        logger.warning(f"清理临时图片失败: {e}")
+
 async def handle_async_task(task_func, *args, **kwargs):
     """
     異步處理任務的通用函數
@@ -331,7 +469,16 @@ async def handle_async_task(task_func, *args, **kwargs):
 
 def create_async_response(task_func, *args, **kwargs):
     """
-    創建異步響應的通用函數
+    創建異步響應的通用函數，包含去重機制
     """
+    # 生成任务哈希值用于去重
+    task_hash = generate_task_hash(task_func.__name__, *args, **kwargs)
+    
+    # 检查是否为重复任务
+    if is_duplicate_task(task_hash):
+        logger.info(f"跳过重复任务执行: {task_func.__name__}")
+        return web.json_response({"status": "200", "message": "任务已存在，跳过重复执行"}, status=200)
+    
+    # 创建异步任务
     asyncio.create_task(handle_async_task(task_func, *args, **kwargs))
     return web.json_response({"status": "200", "message": "接收成功，稍後發送"}, status=200) 

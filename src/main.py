@@ -26,6 +26,7 @@ from handlers.weekly_report_handler import handle_weekly_report
 from handlers.scalp_update_handler import handle_scalp_update
 from handlers.holding_report_handler import handle_holding_report
 from handlers.trade_summary_handler import handle_trade_summary
+from handlers.common import cleanup_dedup_cache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -491,7 +492,11 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
 
             # 如果是资讯群，检查是否为验证通过的用户
             elif str(chat_id) in social_groups:
-                # verified_user = await is_user_verified(user_id)  # 检查是否已验证
+                
+                if user.is_bot:
+                    logger.info(f"檢測到 bot {user_id} 加入资讯群 {chat_id}")
+                    return
+
                 verified_user = await get_verified_user(user_id, chat_id)
                 if not verified_user:
                     logger.warning(f"未验证用户 {user_id} 试图加入资讯群 {chat_id}，踢出...")
@@ -607,6 +612,18 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
         if not content:
             return web.json_response({"status": "error", "message": "Missing 'content'"}, status=400)
 
+        # 解析多语言内容
+        try:
+            if isinstance(content, str):
+                # 如果是字符串，尝试解析为JSON
+                import json
+                content_dict = json.loads(content)
+            else:
+                # 如果已经是字典，直接使用
+                content_dict = content
+        except (json.JSONDecodeError, TypeError):
+            return web.json_response({"status": "error", "message": "Invalid content format. Expected JSON object with language codes as keys."}, status=400)
+
         # 認證（可選）
         # auth = request.headers.get("Authorization", "")
         # if not auth or auth != "Bearer your_api_key":
@@ -623,68 +640,177 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
 
         results = []
 
-        async def send_to_channel(chat_id, topic_id):
+        async def send_to_channel(chat_id, topic_id, lang_content, lang_code):
             try:
+                # 添加AI提示词到文案末尾
+                from multilingual_utils import AI_TRANSLATE_HINT
+                
+                # 检查是否已经包含AI提示词
+                def has_ai_hint(text):
+                    """检查文本是否已经包含 AI 提示词"""
+                    ai_hint_patterns = [
+                        "~AI翻译", "~AI 自動翻譯", "~AI Translation",
+                        "AI翻译", "AI 自動翻譯", "AI Translation",
+                        "由AI", "by AI", "AI翻訳", "AI 자동 번역",
+                        "仅供参考", "for reference", "参考用", "참고용"
+                    ]
+                    text_lower = text.lower()
+                    return any(pattern.lower() in text_lower for pattern in ai_hint_patterns)
+                
+                # 如果内容已经包含AI提示词，不再添加
+                if has_ai_hint(lang_content):
+                    final_content = lang_content
+                    logger.info(f"内容已包含AI提示词，不再添加")
+                else:
+                    # 获取对应语言的AI提示词
+                    hint = AI_TRANSLATE_HINT.get(lang_code, AI_TRANSLATE_HINT["en_US"])
+                    final_content = lang_content + "\n" + hint
+                
+                # 处理HTML格式的内容
+                def process_html_content(text):
+                    """处理HTML格式的内容，确保链接和格式正确"""
+                    # 替换Markdown链接为HTML链接
+                    import re
+                    # 处理 [text](url) 格式的链接
+                    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+                    # 处理 **text** 格式的粗体
+                    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+                    # 处理 *text* 格式的斜体
+                    text = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', text)
+                    # 替换换行符
+                    text = text.replace("<br>", "\n")
+                    return text
+                
+                # 处理内容为HTML格式
+                processed_content = process_html_content(final_content)
+                
+                logger.info(f"准备发送到频道 {chat_id}, topic {topic_id}, 语言 {lang_code}")
+                logger.info(f"内容长度: {len(processed_content)} 字符")
+                
                 if image_url:
                     temp_file_path = f"/tmp/temp_image_{chat_id}_{topic_id}.jpg"
+                    logger.info(f"开始下载图片: {image_url}")
                     async with aiohttp.ClientSession() as img_session:
                         async with img_session.get(image_url) as img_resp:
                             if img_resp.status == 200:
                                 async with aiofiles.open(temp_file_path, "wb") as f:
                                     await f.write(await img_resp.read())
                                 file = FSInputFile(temp_file_path)
+                                logger.info(f"图片下载完成，开始发送到Telegram")
                                 await asyncio.wait_for(bot.send_photo(
                                     chat_id=chat_id,
                                     photo=file,
-                                    caption=content.replace("<br>", "\n"),
+                                    caption=processed_content,
                                     message_thread_id=topic_id,
-                                    parse_mode="Markdown"
-                                ), timeout=5.0)
+                                    parse_mode="HTML"
+                                ), timeout=15.0)  # 增加超时时间到15秒
                                 os.remove(temp_file_path)
+                                logger.info(f"图片消息发送成功")
                             else:
                                 raise Exception(f"Image fetch error {img_resp.status}")
                 else:
+                    logger.info(f"开始发送文本消息到Telegram")
                     await asyncio.wait_for(bot.send_message(
                         chat_id=chat_id,
-                        # chat_id=-1002370802321,
-                        text=content.replace("<br>", "\n"),
-                        # message_thread_id=11,
+                        text=processed_content,
                         message_thread_id=topic_id,                        
-                        parse_mode="Markdown"
-                    ), timeout=5.0)
+                        parse_mode="HTML"
+                    ), timeout=15.0)  # 增加超时时间到15秒
+                    logger.info(f"文本消息发送成功")
 
-                return {"chat_id": chat_id, "topic_id": topic_id, "status": "sent"}
+                return {"chat_id": chat_id, "topic_id": topic_id, "lang": lang_code, "status": "sent"}
 
             except asyncio.TimeoutError:
-                return {"chat_id": chat_id, "topic_id": topic_id, "status": "failed", "error": "Timeout while sending to Telegram"}
+                logger.error(f"发送到频道 {chat_id} 超时")
+                return {"chat_id": chat_id, "topic_id": topic_id, "lang": lang_code, "status": "failed", "error": "Timeout while sending to Telegram"}
             except Exception as e:
-                return {"chat_id": chat_id, "topic_id": topic_id, "status": "failed", "error": str(e)}
+                logger.error(f"发送到频道 {chat_id} 失败: {e}")
+                return {"chat_id": chat_id, "topic_id": topic_id, "lang": lang_code, "status": "failed", "error": str(e)}
 
         # 準備所有待發送的任務
         tasks = []
         for item in social_data.get("data", []):
             chat_id = item.get("socialGroup")
+            channel_lang = item.get("lang")
+            
+            # 如果频道没有设置语言或为null，使用默认语言"en_US"
+            if not channel_lang or channel_lang is None:
+                channel_lang = "en_US"
+                logger.info(f"Channel {chat_id} has no language set, using default: {channel_lang}")
+            
+            # 查找对应的语言内容
+            lang_content = content_dict.get(channel_lang)
+            if not lang_content:
+                logger.warning(f"No content found for language {channel_lang} in channel {chat_id}")
+                continue
+            
             for chat in item.get("chats", []):
                 if chat.get("name") == "Announcements" and chat.get("enable"):
                     topic_id = chat.get("chatId")
-                    tasks.append(send_to_channel(chat_id, topic_id))
+                    tasks.append(send_to_channel(chat_id, topic_id, lang_content, channel_lang))
+                    logger.info(f"Prepared announcement for channel {chat_id} (lang: {channel_lang})")
 
-        # 並行發送
-        results = await asyncio.gather(*tasks)
+        # 立即返回响应，后台异步处理发送任务
+        if tasks:
+            logger.info(f"准备后台异步发送 {len(tasks)} 个公告任务")
+            
+            # 创建后台任务处理发送
+            async def background_send_announcements():
+                try:
+                    results = []
+                    logger.info(f"开始串行发送 {len(tasks)} 个公告任务")
+                    for i, task in enumerate(tasks, 1):
+                        logger.info(f"发送第 {i}/{len(tasks)} 个公告")
+                        try:
+                            result = await task
+                            results.append(result)
+                            # 在每次发送之间添加短暂延迟，避免API限流
+                            if i < len(tasks):
+                                await asyncio.sleep(1.0)
+                        except Exception as e:
+                            logger.error(f"发送第 {i} 个公告时发生异常: {e}")
+                            results.append({"status": "failed", "error": str(e)})
+                    
+                    # 发送到 Discord 机器人
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            # 发送所有语言内容到 Discord
+                            dc_payload = {"content": content_dict, "image": image_url}
+                            async with session.post(DISCORD_BOT, json=dc_payload) as dc_resp:
+                                dc_resp_json = await dc_resp.json()
+                                logger.info(f"[TG] Discord 發送結果: {dc_resp.status} - {dc_resp_json}")
+                    except Exception as e:
+                        logger.error(f"[TG] 呼叫 Discord 發送公告時出錯: {e}")
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                dc_payload = {"content": content, "image": image_url}
-                async with session.post(DISCORD_BOT, json=dc_payload) as dc_resp:
-                    dc_resp_json = await dc_resp.json()
-                    logger.info(f"[TG] Discord 發送結果: {dc_resp.status} - {dc_resp_json}")
-        except Exception as e:
-            logger.error(f"[TG] 呼叫 Discord 發送公告時出錯: {e}")
-
-        return web.json_response({"status": "success", "message": "Announcement dispatched.", "results": results}, status=200)
+                    # 统计发送结果
+                    success_count = sum(1 for r in results if r.get("status") == "sent")
+                    failed_count = len(results) - success_count
+                    
+                    logger.info(f"[TG] 公告發送完成: 成功 {success_count}/{len(results)} 個頻道")
+                    
+                except Exception as e:
+                    logger.error(f"后台发送公告时发生错误: {e}")
+            
+            # 启动后台任务
+            asyncio.create_task(background_send_announcements())
+            
+            return web.json_response({
+                "status": "success", 
+                "message": f"公告信息佇列中... {len(tasks)} 個頻道將在背景中處理.", 
+                "queued_count": len(tasks)
+            }, status=200)
+        else:
+            logger.warning("No announcement tasks prepared")
+            return web.json_response({
+                "status": "success", 
+                "message": "No announcement tasks prepared", 
+                "queued_count": 0
+            }, status=200)
 
     except Exception as e:
         logger.error(f"Error in handle_send_announcement: {e}")
+        import traceback
+        logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
 async def start_aiohttp_server(bot: Bot):
@@ -731,6 +857,17 @@ async def periodic_task(bot: Bot):
         logger.info("周期性任务被取消，正在退出...")
         raise
 
+async def cache_cleanup_task():
+    """定期清理去重缓存的任务"""
+    try:
+        while True:
+            await cleanup_dedup_cache()
+            # 每5分钟清理一次缓存
+            await asyncio.sleep(300)
+    except asyncio.CancelledError:
+        logger.info("缓存清理任务被取消，正在退出...")
+        raise
+
 async def main():
     """主函数"""
     try:
@@ -748,6 +885,9 @@ async def main():
         logger.info("创建周期性任务...")
         periodic_task_instance = asyncio.create_task(periodic_task(bot))
 
+        logger.info("创建缓存清理任务...")
+        cache_cleanup_task_instance = asyncio.create_task(cache_cleanup_task())
+
         logger.info("启动 HTTP API 服务器...")
         http_server_runner, _ = await start_aiohttp_server(bot)
 
@@ -760,6 +900,7 @@ async def main():
         await asyncio.gather(
             heartbeat_task, 
             periodic_task_instance, 
+            cache_cleanup_task_instance,
             polling_task,
             return_exceptions=True
         )

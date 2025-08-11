@@ -10,7 +10,7 @@ from aiogram.types import FSInputFile
 from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     generate_trader_summary_image, format_timestamp_ms_to_utc,
-    create_async_response
+    create_async_response, generate_trader_summary_image_async, cleanup_temp_image
 )
 
 load_dotenv()
@@ -92,6 +92,7 @@ def validate_copy_signal(data: dict) -> None:
 
 async def process_copy_signal(data: dict, bot: Bot) -> None:
     """背景協程：查詢推送目標、產圖並發送訊息。"""
+    img_path = None
     try:
         trader_uid = str(data["trader_uid"])
 
@@ -102,8 +103,8 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             logger.warning(f"未找到符合條件的推送頻道: {trader_uid}")
             return
 
-        # 產生交易員統計圖片
-        # img_path = generate_trader_summary_image(
+        # 异步产生交易員統計圖片，使用锁确保线程安全
+        # img_path = await generate_trader_summary_image_async(
         #     data["trader_url"],
         #     data["trader_name"],
         #     data["trader_pnlpercentage"],
@@ -150,7 +151,8 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
                     topic_id=topic_id,
                     text=caption,
                     # photo_path=img_path,
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    trader_uid=trader_uid
                 )
             )
 
@@ -162,4 +164,8 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             await send_discord_message(DISCORD_BOT_COPY, data)
 
     except Exception as e:
-        logger.error(f"推送 copy signal 失敗: {e}") 
+        logger.error(f"推送 copy signal 失敗: {e}")
+    finally:
+        # 清理临时图片文件
+        if img_path:
+            await cleanup_temp_image(img_path) 

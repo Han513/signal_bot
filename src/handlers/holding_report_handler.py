@@ -166,30 +166,56 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
         logger.info(f"[持倉報告] 原始trader數量: {len(data_raw)}")
 
         all_tasks = []
+        skipped_count = 0
+        
         for trader in data_raw:
             trader_uid = str(trader["trader_uid"])
+            trader_name = trader.get("trader_name", "Unknown")
+            
+            logger.info(f"[持倉報告] 處理 trader: {trader_name} (UID: {trader_uid})")
+            
             push_targets = await get_push_targets(trader_uid)
+            
             if not push_targets:
-                logger.info(f"[持倉報告] trader_uid={trader_uid} 無推送目標，跳過")
+                # logger.info(f"[持倉報告] trader_uid={trader_uid} ({trader_name}) 無推送目標，跳過")
+                skipped_count += 1
                 continue
-            # 合并所有 infos 为一条消息
-            text = format_holding_report_list_text(trader["infos"], trader, True)
+            
+            logger.info(f"[持倉報告] trader_uid={trader_uid} ({trader_name}) 找到 {len(push_targets)} 個推送目標")
+            
             for chat_id, topic_id, jump in push_targets:
+                logger.info(f"[持倉報告] 準備發送到: chat_id={chat_id}, topic_id={topic_id}, jump={jump}")
+                # 根据jump值决定是否包含链接
+                include_link = (jump == "1")
+                text = format_holding_report_list_text(trader["infos"], trader, include_link)
                 all_tasks.append(
                     send_telegram_message(
                         bot=bot,
                         chat_id=chat_id,
                         topic_id=topic_id,
                         text=text,
-                        parse_mode="Markdown"
+                        parse_mode="Markdown",
+                        trader_uid=trader_uid
                     )
                 )
+        
+        # logger.info(f"[持倉報告] 跳過 {skipped_count} 個無推送目標的 trader")
         logger.info(f"[持倉報告] 開始推送 Telegram, 頻道數: {len(all_tasks)}")
-        results = await asyncio.gather(*all_tasks, return_exceptions=True)
-        for idx, r in enumerate(results):
-            if isinstance(r, Exception):
-                logger.error(f"[持倉報告] Telegram 發送異常 (index={idx}): {r}")
-        logger.info(f"[持倉報告] Telegram 推送結束")
+        
+        if all_tasks:
+            results = await asyncio.gather(*all_tasks, return_exceptions=True)
+            success_count = 0
+            for idx, r in enumerate(results):
+                if isinstance(r, Exception):
+                    logger.error(f"[持倉報告] Telegram 發送異常 (index={idx}): {r}")
+                elif r is True:
+                    success_count += 1
+                else:
+                    logger.error(f"[持倉報告] Telegram 發送失敗 (index={idx}): {r}")
+            
+            logger.info(f"[持倉報告] Telegram 推送完成: {success_count}/{len(all_tasks)} 成功")
+        else:
+            logger.warning("[持倉報告] 沒有可推送的任務")
 
         # 推送 Discord Bot，保持原始结构，分批每10个trader一批
         if DISCORD_BOT_HOLDING and data_raw is not None:
@@ -198,7 +224,7 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             logger.info(f"[持倉報告] 準備分批推送到 Discord Bot, 批次大小: {batch_size}, 總數: {total}")
             for i in range(0, total, batch_size):
                 batch = data_raw[i:i+batch_size]
-                logger.info(f"[持倉報告] 即將發送到 Discord Bot, 批次 {i//batch_size+1}: {batch}")
+                logger.info(f"[持倉報告] 即將發送到 Discord Bot, 批次 {i//batch_size+1}: {len(batch)} 個 trader")
                 try:
                     await send_discord_message(DISCORD_BOT_HOLDING, batch)
                     logger.info(f"[持倉報告] Discord 批次 {i//batch_size+1} 發送完成")
@@ -207,6 +233,8 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
 
     except Exception as e:
         logger.error(f"推送持倉報告列表失敗: {e}")
+        import traceback
+        logger.error(f"詳細錯誤: {traceback.format_exc()}")
 
 async def process_single_holding_report(data: dict, bot: Bot) -> None:
     """處理單個持倉報告項目"""
@@ -223,14 +251,17 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
         # 準備發送任務
         tasks = []
         for chat_id, topic_id, jump in push_targets:
-            text = format_holding_report_text(data, jump == "1")
+            # 根据jump值决定是否包含链接
+            include_link = (jump == "1")
+            text = format_holding_report_text(data, include_link)
             tasks.append(
                 send_telegram_message(
                     bot=bot,
                     chat_id=chat_id,
                     topic_id=topic_id,
                     text=text,
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    trader_uid=trader_uid
                 )
             )
 
@@ -265,7 +296,7 @@ def format_holding_report_text(data: dict, include_link: bool = True) -> str:
     has_sl = bool(data.get("sl_price"))
     
     text = (
-        f"⚡️{data.get('trader_name', 'Trader')} Trading Summary (Updated every 2 hours)\n\n"
+        f"⚡️{data.get('trader_name', 'Trader')} Trading Summary (Updated every 12 hours)\n\n"
         f"📢{data.get('pair', '')} {margin_type} {leverage}X\n"
         f"➡️Direction: {pair_side}\n"
         f"🎯Entry Price: ${entry_price}\n"
@@ -297,7 +328,7 @@ def format_holding_report_list_text(infos: list, trader: dict, include_link: boo
     if not infos:
         return ""
     trader_name = trader.get('trader_name', 'Trader')
-    text = f"⚡️{trader_name} Trading Summary (Updated every 2 hours)\n\n"
+    text = f"⚡️{trader_name} Trading Summary (Updated every 12 hours)\n\n"
     for i, data in enumerate(infos, 1):
         pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
         margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}

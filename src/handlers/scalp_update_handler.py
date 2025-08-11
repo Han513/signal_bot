@@ -100,7 +100,9 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
         # 準備發送任務
         tasks = []
         for chat_id, topic_id, jump in push_targets:
-            text = format_scalp_update_text(data, formatted_time, jump == "1")
+            # 根据jump值决定是否包含链接
+            include_link = (jump == "1")
+            text = format_scalp_update_text(data, formatted_time, include_link)
             
             tasks.append(
                 send_telegram_message(
@@ -108,7 +110,8 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
                     chat_id=chat_id,
                     topic_id=topic_id,
                     text=text,
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    trader_uid=trader_uid
                 )
             )
 

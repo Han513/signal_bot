@@ -1,6 +1,8 @@
 import os
 import asyncio
 import logging
+import uuid
+import tempfile
 from aiogram import Bot
 from aiohttp import web
 from dotenv import load_dotenv
@@ -15,6 +17,9 @@ load_dotenv()
 DISCORD_BOT_SUMMARY = os.getenv("DISCORD_BOT_SUMMARY")
 
 logger = logging.getLogger(__name__)
+
+# 添加图片生成锁，防止并发冲突
+_image_generation_lock = asyncio.Lock()
 
 async def handle_trade_summary(request: web.Request, *, bot: Bot):
     """
@@ -77,50 +82,6 @@ def validate_trade_summary(data: dict) -> None:
     except (TypeError, ValueError):
         raise ValueError("close_time 必須為毫秒級時間戳 (數字格式)")
 
-async def process_trade_summary(data: dict, bot: Bot) -> None:
-    """背景協程：處理交易總結推送"""
-    try:
-        trader_uid = str(data["trader_uid"])
-
-        # 獲取推送目標
-        push_targets = await get_push_targets(trader_uid)
-
-        if not push_targets:
-            logger.warning(f"未找到符合條件的交易總結推送頻道: {trader_uid}")
-            return
-
-        # 生成交易總結圖片
-        img_path = generate_trade_summary_image(data)
-        if not img_path:
-            logger.warning("交易總結圖片生成失敗，取消推送")
-            return
-
-        # 準備發送任務
-        tasks = []
-        for chat_id, topic_id, jump in push_targets:
-            text = format_trade_summary_text(data, jump == "1")
-            
-            tasks.append(
-                send_telegram_message(
-                    bot=bot,
-                    chat_id=chat_id,
-                    topic_id=topic_id,
-                    text=text,
-                    photo_path=img_path,
-                    parse_mode="Markdown"
-                )
-            )
-
-        # 等待 Telegram 發送結果
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 同步發送至 Discord Bot
-        if DISCORD_BOT_SUMMARY:
-            await send_discord_message(DISCORD_BOT_SUMMARY, data)
-
-    except Exception as e:
-        logger.error(f"推送交易總結失敗: {e}")
-
 def format_trade_summary_text(data: dict, include_link: bool = True) -> str:
     """格式化交易總結文本"""
     # 文案映射
@@ -158,12 +119,17 @@ def format_trade_summary_text(data: dict, include_link: bool = True) -> str:
     return text
 
 def generate_trade_summary_image(data: dict) -> str:
-    """生成交易總結圖片 - 配合新背景圖格式"""
+    """生成交易總結圖片 - 配合新背景圖格式，支持并发安全"""
     try:
+        # 生成唯一的临时文件路径，避免并发冲突
+        unique_id = str(uuid.uuid4())[:8]
+        temp_path = f"/tmp/trade_summary_{unique_id}.png"
+        
         # 載入背景圖
         bg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'pics', 'trade_summary.png'))
         if os.path.exists(bg_path):
-            img = Image.open(bg_path).convert('RGB')
+            # 创建背景图的副本，避免并发修改
+            img = Image.open(bg_path).convert('RGB').copy()
         else:
             # 如果背景圖不存在，創建預設背景
             img = Image.new('RGB', (1200, 675), color=(40, 40, 40))
@@ -230,11 +196,81 @@ def generate_trade_summary_image(data: dict) -> str:
         draw.text((80, 560), "Entry Price", font=small_font, fill=(200, 200, 200))
         draw.text((290, 560), entry_price, font=small_font, fill=(255, 255, 255))
         
-        # 保存圖片
-        temp_path = "/tmp/trade_summary.png"
+        # 保存圖片到唯一路径
         img.save(temp_path, quality=95)
+        
+        # 清理图像对象
+        img.close()
+        
+        logger.info(f"成功生成交易总结图片: {temp_path}")
         return temp_path
         
     except Exception as e:
         logger.error(f"生成交易總結圖片失敗: {e}")
-        return None 
+        return None
+
+async def generate_trade_summary_image_async(data: dict) -> str:
+    """异步生成交易总结图片，使用锁确保线程安全"""
+    async with _image_generation_lock:
+        return generate_trade_summary_image(data)
+
+async def cleanup_temp_image(image_path: str):
+    """清理临时图片文件"""
+    try:
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+            logger.debug(f"已清理临时图片: {image_path}")
+    except Exception as e:
+        logger.warning(f"清理临时图片失败: {e}")
+
+async def process_trade_summary(data: dict, bot: Bot) -> None:
+    """背景協程：處理交易總結推送"""
+    img_path = None
+    try:
+        trader_uid = str(data["trader_uid"])
+
+        # 獲取推送目標
+        push_targets = await get_push_targets(trader_uid)
+
+        if not push_targets:
+            logger.warning(f"未找到符合條件的交易總結推送頻道: {trader_uid}")
+            return
+
+        # 异步生成交易總結圖片，使用锁确保线程安全
+        img_path = await generate_trade_summary_image_async(data)
+        if not img_path:
+            logger.warning("交易總結圖片生成失敗，取消推送")
+            return
+
+        # 準備發送任務
+        tasks = []
+        for chat_id, topic_id, jump in push_targets:
+            # 根据jump值决定是否包含链接
+            include_link = (jump == "1")
+            text = format_trade_summary_text(data, include_link)
+            
+            tasks.append(
+                send_telegram_message(
+                    bot=bot,
+                    chat_id=chat_id,
+                    topic_id=topic_id,
+                    text=text,
+                    photo_path=img_path,
+                    parse_mode="Markdown",
+                    trader_uid=trader_uid
+                )
+            )
+
+        # 等待 Telegram 發送結果
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 同步發送至 Discord Bot
+        if DISCORD_BOT_SUMMARY:
+            await send_discord_message(DISCORD_BOT_SUMMARY, data)
+
+    except Exception as e:
+        logger.error(f"推送交易總結失敗: {e}")
+    finally:
+        # 清理临时图片文件
+        if img_path:
+            await cleanup_temp_image(img_path) 
