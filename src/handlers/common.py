@@ -28,6 +28,7 @@ _image_generation_lock = asyncio.Lock()
 # 全局去重缓存，用于防止重复推送
 _message_dedup_cache = {}
 _task_dedup_cache = {}
+_message_dedup_lock = asyncio.Lock()
 
 # 清理过期缓存的任务
 async def cleanup_dedup_cache():
@@ -35,9 +36,9 @@ async def cleanup_dedup_cache():
     current_time = time.time()
     expired_keys = []
     
-    # 清理消息缓存（5分钟过期）
+    # 清理消息缓存（1分钟过期）
     for key, (timestamp, _) in _message_dedup_cache.items():
-        if current_time - timestamp > 300:  # 5分钟
+        if current_time - timestamp > 60:  # 1分钟
             expired_keys.append(key)
     
     for key in expired_keys:
@@ -91,6 +92,12 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
                     jump = str(chat.get("jump", "0"))
                     if chat_id and topic_id:
                         push_targets.append((chat_id, int(topic_id), jump))
+        # 去除重複的 (chat_id, topic_id, jump)
+        if push_targets:
+            unique = {}
+            for chat_id, topic_id, jump in push_targets:
+                unique[(chat_id, topic_id)] = jump  # 同一 topic 只保留一個
+            push_targets = [(cid, tid, unique[(cid, tid)]) for (cid, tid) in unique.keys()]
         
         return push_targets
         
@@ -119,7 +126,8 @@ async def send_telegram_message(bot: Bot, chat_id: int, topic_id: int,
     # 消息去重检查
     if trader_uid and text:
         message_hash = generate_message_hash(trader_uid, text, chat_id, topic_id)
-        if is_duplicate_message(message_hash):
+        # 使用帶鎖檢查避免競態
+        if await is_duplicate_message_safe(message_hash):
             logger.info(f"跳过重复消息发送: trader_uid={trader_uid}, chat_id={chat_id}, topic_id={topic_id}")
             return True  # 返回True表示"成功"跳过重复消息
     
@@ -257,13 +265,16 @@ def generate_task_hash(func_name: str, *args, **kwargs) -> str:
     return hashlib.md5(task_data.encode('utf-8')).hexdigest()
 
 def is_duplicate_message(message_hash: str) -> bool:
-    """检查是否为重复消息"""
+    """检查是否为重复消息（非協程上下文，無鎖）。
+    如果不存在，會將該 hash 寫入快取，表示已在本輪準備發送。
+    有效期為 1 分鐘。
+    """
     current_time = time.time()
     
     # 清理过期缓存
     expired_keys = []
     for key, (timestamp, _) in _message_dedup_cache.items():
-        if current_time - timestamp > 300:  # 5分钟过期
+        if current_time - timestamp > 60:  # 1分钟过期
             expired_keys.append(key)
     
     for key in expired_keys:
@@ -277,6 +288,20 @@ def is_duplicate_message(message_hash: str) -> bool:
     # 添加到缓存
     _message_dedup_cache[message_hash] = (current_time, True)
     return False
+
+async def is_duplicate_message_safe(message_hash: str) -> bool:
+    """攔截併發的帶鎖版本，避免競態條件。"""
+    async with _message_dedup_lock:
+        return is_duplicate_message(message_hash)
+
+def has_message_hash(message_hash: str) -> bool:
+    """檢查 hash 是否已在快取中（非協程，無副作用）。"""
+    return message_hash in _message_dedup_cache
+
+async def has_message_hash_safe(message_hash: str) -> bool:
+    """帶鎖檢查 hash 是否存在，用於重試時判斷是否已實際發送成功。"""
+    async with _message_dedup_lock:
+        return has_message_hash(message_hash)
 
 def is_duplicate_task(task_hash: str) -> bool:
     """检查是否为重复任务"""

@@ -183,7 +183,12 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             
             logger.info(f"[持倉報告] trader_uid={trader_uid} ({trader_name}) 找到 {len(push_targets)} 個推送目標")
             
+            seen = set()
             for chat_id, topic_id, jump in push_targets:
+                key = (chat_id, topic_id)
+                if key in seen:
+                    continue
+                seen.add(key)
                 logger.info(f"[持倉報告] 準備發送到: chat_id={chat_id}, topic_id={topic_id}, jump={jump}")
                 # 根据jump值决定是否包含链接
                 include_link = (jump == "1")
@@ -250,7 +255,12 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
 
         # 準備發送任務
         tasks = []
+        seen = set()
         for chat_id, topic_id, jump in push_targets:
+            key = (chat_id, topic_id)
+            if key in seen:
+                continue
+            seen.add(key)
             # 根据jump值决定是否包含链接
             include_link = (jump == "1")
             text = format_holding_report_text(data, include_link)

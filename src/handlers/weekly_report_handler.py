@@ -155,9 +155,14 @@ async def process_weekly_report_list(data_list: list, bot: Bot) -> None:
 
         logger.info(f"[週報] 圖片生成成功: {img_path}")
 
-        # 準備發送任務
+        # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
+        seen = set()
         for chat_id, topic_id, jump in push_targets:
+            key = (chat_id, topic_id)
+            if key in seen:
+                continue
+            seen.add(key)
             # 根据jump值决定是否包含链接
             include_link = (jump == "1")
             caption = format_weekly_report_list_text(data_list, include_link)
@@ -260,9 +265,14 @@ async def process_single_weekly_report(data: dict, bot: Bot) -> None:
 
         logger.info(f"[週報] 圖片生成成功: {img_path}")
 
-        # 準備發送任務
+        # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
+        seen = set()
         for chat_id, topic_id, jump in push_targets:
+            key = (chat_id, topic_id)
+            if key in seen:
+                continue
+            seen.add(key)
             # 根据jump值决定是否包含链接
             include_link = (jump == "1")
             caption = format_weekly_report_text(data, include_link)

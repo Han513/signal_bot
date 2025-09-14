@@ -97,9 +97,14 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
         # 格式化時間
         formatted_time = format_timestamp_ms_to_utc(data.get('time'))
 
-        # 準備發送任務
+        # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
+        seen = set()
         for chat_id, topic_id, jump in push_targets:
+            key = (chat_id, topic_id)
+            if key in seen:
+                continue
+            seen.add(key)
             # 根据jump值决定是否包含链接
             include_link = (jump == "1")
             text = format_scalp_update_text(data, formatted_time, include_link)

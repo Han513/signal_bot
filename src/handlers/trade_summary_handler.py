@@ -242,9 +242,14 @@ async def process_trade_summary(data: dict, bot: Bot) -> None:
             logger.warning("交易總結圖片生成失敗，取消推送")
             return
 
-        # 準備發送任務
+        # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
+        seen = set()
         for chat_id, topic_id, jump in push_targets:
+            key = (chat_id, topic_id)
+            if key in seen:
+                continue
+            seen.add(key)
             # 根据jump值决定是否包含链接
             include_link = (jump == "1")
             text = format_trade_summary_text(data, include_link)

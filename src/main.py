@@ -657,12 +657,16 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
                     text_lower = text.lower()
                     return any(pattern.lower() in text_lower for pattern in ai_hint_patterns)
                 
-                # 如果内容已经包含AI提示词，不再添加
+                # 如果内容已经包含AI提示词，不再添加；英文直接不添加
                 if has_ai_hint(lang_content):
                     final_content = lang_content
                     logger.info(f"内容已包含AI提示词，不再添加")
+                elif str(lang_code).lower().startswith("en"):
+                    # 英文不附加 AI 提示詞
+                    final_content = lang_content
+                    logger.info(f"英文內容不添加 AI 提示詞")
                 else:
-                    # 获取对应语言的AI提示词
+                    # 非英文附加對應語言提示
                     hint = AI_TRANSLATE_HINT.get(lang_code, AI_TRANSLATE_HINT["en_US"])
                     final_content = lang_content + "\n" + hint
                 
@@ -862,8 +866,8 @@ async def cache_cleanup_task():
     try:
         while True:
             await cleanup_dedup_cache()
-            # 每5分钟清理一次缓存
-            await asyncio.sleep(300)
+            # 每1分钟清理一次缓存
+            await asyncio.sleep(60)
     except asyncio.CancelledError:
         logger.info("缓存清理任务被取消，正在退出...")
         raise
