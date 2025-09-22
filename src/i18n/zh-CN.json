@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️**{trader_name}** 新开仓\n\n📢{pair} {margin_type} {leverage}X\n\n⏰时间：{formatted_time} (UTC+0)\n➡️方向：{pair_type} {pair_side}\n🎯入场价：${entry_price}",
+      "more": "[关于 {trader_name}，查看更多操作>>]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️{trader_name} 持仓摘要（每 12 小时更新）\n\n📢{pair} {margin_type} {leverage}X\n➡️方向：{pair_side}\n🎯入场价：${entry_price}\n📊当前价格：${current_price}\n🚀收益率：{roi}%",
+      "header": "⚡️{trader_name} 持仓摘要（每 12 小时更新）",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️方向：{pair_side}\n🎯入场价：${entry_price}\n📊当前价格：${current_price}\n🚀收益率：{roi}%",
+      "tp_line": "✅止盈价格：${tp_price}",
+      "sl_line": "🛑止损价格：${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️{trader_name} 平仓\n\n📢{pair} {margin_type} {leverage}X\n⏰时间：{formatted_time} (UTC+0)\n➡️方向：关于 {pair_side} 平仓\n🙌🏻收益率：{realized_pnl}%\n🎯入场价：${entry_price}\n💰出场价：${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️{trader_name} 设置止盈/止损\n\n📢{pair} {pair_side}\n⏰时间：{formatted_time} (UTC+0)",
+      "update_header": "⚡️{trader_name} 止盈/止损更新\n\n📢{pair} {pair_side}\n⏰时间：{formatted_time} (UTC+0)",
+      "tp_update_line": "✅止盈价格：${previous_tp_price} 调整为 ${tp_price}",
+      "tp_set_line": "✅止盈价格：${tp_price}",
+      "sl_update_line": "🛑止损价格：${previous_sl_price} 调整为 ${sl_price}",
+      "sl_set_line": "🛑止损价格：${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️{trader_name} 每周绩效报告",
+      "body": "⚡️{trader_name} 每周绩效报告\n\n{roi_emoji} 总收益率：{total_roi}%\n\n📈 总交易数：{total_trades}\n✅ 胜：{win_trades}\n❌ 负：{loss_trades}\n🏆 胜率：{win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n{roi_emoji} 总收益率：{total_roi}%\n📈 总交易数：{total_trades}\n✅ 胜：{win_trades}\n❌ 负：{loss_trades}\n🏆 胜率：{win_rate}%\n"
+    }
+  }
+} 

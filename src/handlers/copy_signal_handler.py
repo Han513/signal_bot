@@ -12,6 +12,7 @@ from .common import (
     generate_trader_summary_image, format_timestamp_ms_to_utc,
     create_async_response, generate_trader_summary_image_async, cleanup_temp_image
 )
+from multilingual_utils import get_preferred_language, render_template
 
 load_dotenv()
 DISCORD_BOT_COPY = os.getenv("DISCORD_BOT_COPY")
@@ -103,6 +104,14 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             logger.warning(f"未找到符合條件的推送頻道: {trader_uid}")
             return
 
+        # 決定 Discord 使用的語言（取第一個推送目標的語言，若無則查 API，再 fallback 英文）
+        try:
+            first_chat_id, _, _, first_group_lang = push_targets[0]
+            first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+            discord_lang = first_group_lang or first_api_lang or 'en'
+        except Exception:
+            discord_lang = 'en'
+
         # 异步产生交易員統計圖片，使用锁确保线程安全
         # img_path = await generate_trader_summary_image_async(
         #     data["trader_url"],
@@ -125,7 +134,7 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
         # 準備發送任務（再次以 (chat_id, topic_id) 去重，避免配置重複）
         tasks = []
         seen = set()
-        for chat_id, topic_id, jump in push_targets:
+        for chat_id, topic_id, jump, group_lang in push_targets:
             key = (chat_id, topic_id)
             if key in seen:
                 continue
@@ -135,26 +144,45 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             pair_side_str = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
             margin_type_str = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
 
-            caption = (
-                f"⚡️**{data['trader_name']}** New Trade Open\n\n"
-                f"📢{data['pair']} {margin_type_str} {data['pair_leverage']}X\n\n"
-                f"⏰Time: {formatted_time} (UTC+0)\n"
-                f"➡️Direction: {pair_type_str} {pair_side_str}\n"
-                f"🎯Entry Price: ${data['price']}"
-            )
-            
+            # 取得語言（若 API/快取失敗將回退 'en'）
+            api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+            lang = group_lang or api_lang or 'en'
+            logger.info(f"[i18n] copy chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+            # 準備渲染資料
+            tpl_data = {
+                "trader_name": data.get('trader_name'),
+                "pair": data.get('pair'),
+                "margin_type": margin_type_str,
+                "leverage": data.get('pair_leverage'),
+                "formatted_time": formatted_time,
+                "pair_type": pair_type_str,
+                "pair_side": pair_side_str,
+                "entry_price": data.get('price'),
+                "detail_url": data.get('trader_detail_url'),
+            }
+
+            # 渲染正文
+            caption = render_template("copy.open.body", lang, tpl_data, fallback_lang='en')
+
+            # 更多動作鏈接（可選）
             if jump == "1":
-                # 使用 Markdown 格式創建可點擊的超連結
-                trader_name = data.get('trader_name', 'Trader')
-                detail_url = data.get('trader_detail_url', '')
-                caption += f"\n\n[About {trader_name}, more actions>>]({detail_url})"
-            
+                more = render_template("copy.open.more", lang, tpl_data, fallback_lang='en')
+                if more:
+                    caption += f"\n\n{more}"
+
             tasks.append(
                 send_telegram_message(
                     bot=bot,
                     chat_id=chat_id,
                     topic_id=topic_id,
-                    text=caption,
+                    text=caption or (
+                        f"⚡️**{data['trader_name']}** New Trade Open\n\n"
+                        f"📢{data['pair']} {margin_type_str} {data['pair_leverage']}X\n\n"
+                        f"⏰Time: {formatted_time} (UTC+0)\n"
+                        f"➡️Direction: {pair_type_str} {pair_side_str}\n"
+                        f"🎯Entry Price: ${data['price']}"
+                    ),
                     # photo_path=img_path,
                     parse_mode="Markdown",
                     trader_uid=trader_uid
@@ -166,7 +194,9 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
 
         # 同步發送至 Discord Bot
         if DISCORD_BOT_COPY:
-            await send_discord_message(DISCORD_BOT_COPY, data)
+            payload = dict(data)
+            payload["lang"] = discord_lang
+            await send_discord_message(DISCORD_BOT_COPY, payload)
 
     except Exception as e:
         logger.error(f"推送 copy signal 失敗: {e}")

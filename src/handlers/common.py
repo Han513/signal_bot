@@ -56,6 +56,20 @@ async def cleanup_dedup_cache():
     if expired_keys or expired_task_keys:
         logger.debug(f"清理了 {len(expired_keys)} 个消息缓存和 {len(expired_task_keys)} 个任务缓存")
 
+
+def _normalize_template_lang(lang_code: str) -> str:
+    """將外部語言碼轉為模板語言碼：'en' | 'zh-TW' | 'zh-CN' 等。"""
+    if not lang_code:
+        return 'en'
+    code = str(lang_code)
+    if code in ('en', 'en_US', 'en-US', 'en-Us'):
+        return 'en'
+    if code in ('zh_CN', 'zh-CN', 'zh-Hans'):
+        return 'zh-CN'
+    if code in ('zh_TW', 'zh-TW', 'zh-Hant', 'zh-HK'):
+        return 'zh-TW'
+    return 'en'
+
 async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
     """
     根據 trader_uid 獲取推送目標（固定使用 copy 類型）
@@ -65,7 +79,7 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
         signal_type: 已棄用，固定使用 "copy"
     
     Returns:
-        list: [(chat_id, topic_id, jump), ...]
+        list: [(chat_id, topic_id, jump, lang), ...] 其中 lang 為標準化模板語言碼
     """
     try:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -82,6 +96,7 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
         push_targets = []
         for social in social_data.get("data", []):
             chat_id = social.get("socialGroup")
+            group_lang = _normalize_template_lang(social.get("lang"))
             for chat in social.get("chats", []):
                 if (
                     chat.get("type") == "copy"
@@ -91,13 +106,13 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
                     topic_id = chat.get("chatId")
                     jump = str(chat.get("jump", "0"))
                     if chat_id and topic_id:
-                        push_targets.append((chat_id, int(topic_id), jump))
-        # 去除重複的 (chat_id, topic_id, jump)
+                        push_targets.append((chat_id, int(topic_id), jump, group_lang))
+        # 去除重複的 (chat_id, topic_id, jump, lang) 按 (chat_id, topic_id) 唯一
         if push_targets:
             unique = {}
-            for chat_id, topic_id, jump in push_targets:
-                unique[(chat_id, topic_id)] = jump  # 同一 topic 只保留一個
-            push_targets = [(cid, tid, unique[(cid, tid)]) for (cid, tid) in unique.keys()]
+            for chat_id, topic_id, jump, group_lang in push_targets:
+                unique[(chat_id, topic_id)] = (jump, group_lang)  # 同一 topic 只保留一個
+            push_targets = [(cid, tid, jg[0], jg[1]) for (cid, tid), jg in unique.items()]
         
         return push_targets
         

@@ -9,6 +9,8 @@ from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     format_float, create_async_response
 )
+from multilingual_utils import get_preferred_language, render_template
+
 
 def flatten_holding_report_data(data):
     """
@@ -184,15 +186,78 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             logger.info(f"[持倉報告] trader_uid={trader_uid} ({trader_name}) 找到 {len(push_targets)} 個推送目標")
             
             seen = set()
-            for chat_id, topic_id, jump in push_targets:
+            for chat_id, topic_id, jump, group_lang in push_targets:
                 key = (chat_id, topic_id)
                 if key in seen:
                     continue
                 seen.add(key)
                 logger.info(f"[持倉報告] 準備發送到: chat_id={chat_id}, topic_id={topic_id}, jump={jump}")
-                # 根据jump值决定是否包含链接
                 include_link = (jump == "1")
-                text = format_holding_report_list_text(trader["infos"], trader, include_link)
+
+                # 語言
+                api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+                lang = group_lang or api_lang or 'en'
+                logger.info(f"[i18n] holding(list) chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+                # 構建標題
+                header = render_template(
+                    "holding.summary.header",
+                    lang,
+                    {"trader_name": trader_name},
+                    fallback_lang='en'
+                ) or f"⚡️{trader_name} Trading Summary (Updated every 12 hours)"
+
+                # 拼接每條 info
+                parts = [header, ""]
+                for i, data in enumerate(trader.get("infos", []), 1):
+                    # 文案映射
+                    pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
+                    margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
+                    pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+                    margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
+
+                    tpl = {
+                        "index": i,
+                        "pair": data.get("pair", ""),
+                        "pair_side": pair_side,
+                        "margin_type": margin_type,
+                        "entry_price": str(data.get("entry_price", 0)),
+                        "current_price": str(data.get("current_price", 0)),
+                        "roi": format_float(float(data.get("unrealized_pnl_percentage", 0)) * 100),
+                        "leverage": format_float(data.get("pair_leverage", 0)),
+                        "tp_price": str(data.get("tp_price", 0)) if data.get("tp_price") not in (None, "", "None") else "",
+                        "sl_price": str(data.get("sl_price", 0)) if data.get("sl_price") not in (None, "", "None") else "",
+                    }
+
+                    item_text = render_template("holding.summary.item", lang, tpl, fallback_lang='en') or (
+                        f"**{i}. {tpl['pair']} {tpl['margin_type']} {tpl['leverage']}X**\n"
+                        f"➡️Direction: {tpl['pair_side']}\n"
+                        f"🎯Entry Price: ${tpl['entry_price']}\n"
+                        f"📊Current Price: ${tpl['current_price']}\n"
+                        f"🚀ROI: {tpl['roi']}%"
+                    )
+
+                    # 附加 TP/SL 行
+                    if tpl["tp_price"]:
+                        tp_line = render_template("holding.summary.tp_line", lang, tpl, fallback_lang='en') or f"✅TP Price: ${tpl['tp_price']}"
+                        item_text += "\n" + tp_line
+                    if tpl["sl_price"]:
+                        sl_line = render_template("holding.summary.sl_line", lang, tpl, fallback_lang='en') or f"🛑SL Price: ${tpl['sl_price']}"
+                        item_text += "\n" + sl_line
+
+                    parts.append(item_text)
+                    parts.append("")
+
+                text = "\n".join(p for p in parts if p is not None)
+
+                # 追加鏈接
+                if include_link:
+                    more = render_template("copy.open.more", lang, {
+                        "trader_name": trader_name,
+                        "detail_url": trader.get('trader_detail_url', '')
+                    }, fallback_lang='en') or f"[About {trader_name}, more actions>>]({trader.get('trader_detail_url', '')})"
+                    text += f"\n\n{more}"
+
                 all_tasks.append(
                     send_telegram_message(
                         bot=bot,
@@ -227,11 +292,19 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             batch_size = 10
             total = len(data_raw)
             logger.info(f"[持倉報告] 準備分批推送到 Discord Bot, 批次大小: {batch_size}, 總數: {total}")
+            # 決定 Discord 使用的語言：取第一個推送目標語言，或 API fallback
+            try:
+                first_chat_id, _, _, first_group_lang = push_targets[0]
+                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+                discord_lang = first_group_lang or first_api_lang or 'en'
+            except Exception:
+                discord_lang = 'en'
             for i in range(0, total, batch_size):
                 batch = data_raw[i:i+batch_size]
                 logger.info(f"[持倉報告] 即將發送到 Discord Bot, 批次 {i//batch_size+1}: {len(batch)} 個 trader")
                 try:
-                    await send_discord_message(DISCORD_BOT_HOLDING, batch)
+                    payload = {"data": batch, "lang": discord_lang}
+                    await send_discord_message(DISCORD_BOT_HOLDING, payload)
                     logger.info(f"[持倉報告] Discord 批次 {i//batch_size+1} 發送完成")
                 except Exception as e:
                     logger.error(f"[持倉報告] 發送到 Discord Bot 失敗（批次 {i//batch_size+1}）: {e}")
@@ -256,14 +329,62 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
         # 準備發送任務
         tasks = []
         seen = set()
-        for chat_id, topic_id, jump in push_targets:
+        for chat_id, topic_id, jump, group_lang in push_targets:
             key = (chat_id, topic_id)
             if key in seen:
                 continue
             seen.add(key)
-            # 根据jump值决定是否包含链接
             include_link = (jump == "1")
-            text = format_holding_report_text(data, include_link)
+
+            # 語言
+            api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+            lang = group_lang or api_lang or 'en'
+            logger.info(f"[i18n] holding(single) chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+            # 文案映射
+            pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
+            margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
+            pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+            margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
+
+            tpl = {
+                "trader_name": data.get('trader_name', 'Trader'),
+                "pair": data.get('pair', ''),
+                "pair_side": pair_side,
+                "margin_type": margin_type,
+                "entry_price": str(data.get('entry_price', 0)),
+                "current_price": str(data.get('current_price', 0)),
+                "roi": format_float(float(data.get('unrealized_pnl_percentage', 0)) * 100),
+                "leverage": format_float(data.get('pair_leverage', 0)),
+                "tp_price": str(data.get('tp_price', 0)) if data.get('tp_price') not in (None, "", "None") else "",
+                "sl_price": str(data.get('sl_price', 0)) if data.get('sl_price') not in (None, "", "None") else "",
+                "trader_detail_url": data.get('trader_detail_url', ''),
+            }
+
+            # 主體
+            text = render_template("holding.summary.body", lang, tpl, fallback_lang='en') or (
+                f"⚡️{tpl['trader_name']} Trading Summary (Updated every 12 hours)\n\n"
+                f"📢{tpl['pair']} {tpl['margin_type']} {tpl['leverage']}X\n"
+                f"➡️Direction: {tpl['pair_side']}\n"
+                f"🎯Entry Price: ${tpl['entry_price']}\n"
+                f"📊Current Price: ${tpl['current_price']}\n"
+                f"🚀ROI: {tpl['roi']}%"
+            )
+
+            if tpl["tp_price"]:
+                tp_line = render_template("holding.summary.tp_line", lang, tpl, fallback_lang='en') or f"✅TP Price: ${tpl['tp_price']}"
+                text += "\n" + tp_line
+            if tpl["sl_price"]:
+                sl_line = render_template("holding.summary.sl_line", lang, tpl, fallback_lang='en') or f"🛑SL Price: ${tpl['sl_price']}"
+                text += "\n" + sl_line
+
+            if include_link:
+                more = render_template("copy.open.more", lang, {
+                    "trader_name": tpl['trader_name'],
+                    "detail_url": tpl['trader_detail_url']
+                }, fallback_lang='en') or f"[About {tpl['trader_name']}, more actions>>]({tpl['trader_detail_url']})"
+                text += f"\n\n{more}"
+
             tasks.append(
                 send_telegram_message(
                     bot=bot,
@@ -281,7 +402,16 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
         # 同步發送至 Discord Bot
         if DISCORD_BOT_HOLDING:
             logger.info(f"[持倉報告] 即將發送到 Discord Bot: {data}")
-            await send_discord_message(DISCORD_BOT_HOLDING, data)
+            try:
+                # 取語言：使用第一個目標語言或 API fallback
+                first_chat_id, _, _, first_group_lang = push_targets[0]
+                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+                discord_lang = first_group_lang or first_api_lang or 'en'
+            except Exception:
+                discord_lang = 'en'
+            payload = dict(data)
+            payload["lang"] = discord_lang
+            await send_discord_message(DISCORD_BOT_HOLDING, payload)
 
     except Exception as e:
         logger.error(f"推送單個持倉報告失敗: {e}")

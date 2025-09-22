@@ -9,6 +9,7 @@ from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     format_timestamp_ms_to_utc, format_float, create_async_response
 )
+from multilingual_utils import get_preferred_language, render_template
 
 load_dotenv()
 DISCORD_BOT_SCALP = os.getenv("DISCORD_BOT_SCALP")
@@ -68,9 +69,9 @@ def validate_scalp_update(data: dict) -> None:
             float(data["sl_price"])
         # 檢查 previous 價格（可選）
         if data.get("previous_tp_price"):
-            float(data["previous_tp_price"])
+            float(data["previous_tp_price"]) 
         if data.get("previous_sl_price"):
-            float(data["previous_sl_price"])
+            float(data["previous_sl_price"]) 
     except (TypeError, ValueError):
         raise ValueError("價格欄位必須為數字格式")
 
@@ -100,14 +101,75 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
         # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
         seen = set()
-        for chat_id, topic_id, jump in push_targets:
+        for chat_id, topic_id, jump, group_lang in push_targets:
             key = (chat_id, topic_id)
             if key in seen:
                 continue
             seen.add(key)
-            # 根据jump值决定是否包含链接
             include_link = (jump == "1")
-            text = format_scalp_update_text(data, formatted_time, include_link)
+
+            # 語言
+            api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+            lang = group_lang or api_lang or 'en'
+            logger.info(f"[i18n] scalp chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+            # 文案映射
+            pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
+            pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+
+            # 判斷是否為更新操作
+            has_previous_tp = bool(data.get("previous_tp_price"))
+            has_previous_sl = bool(data.get("previous_sl_price"))
+            is_update = has_previous_tp or has_previous_sl
+
+            tpl = {
+                "trader_name": data.get('trader_name', 'Trader'),
+                "pair": data.get('pair', ''),
+                "pair_side": pair_side,
+                "formatted_time": formatted_time,
+                "tp_price": str(data.get('tp_price', '')) if data.get('tp_price') else '',
+                "sl_price": str(data.get('sl_price', '')) if data.get('sl_price') else '',
+                "previous_tp_price": str(data.get('previous_tp_price', '')) if data.get('previous_tp_price') else '',
+                "previous_sl_price": str(data.get('previous_sl_price', '')) if data.get('previous_sl_price') else '',
+                "trader_detail_url": data.get('trader_detail_url', ''),
+            }
+
+            if is_update:
+                header = render_template("scalp.tp_sl.update_header", lang, tpl, fallback_lang='en') or (
+                    f"⚡️{tpl['trader_name']} TP/SL Update\n\n"
+                    f"📢{tpl['pair']} {tpl['pair_side']}\n"
+                    f"⏰Time: {tpl['formatted_time']} (UTC+0)"
+                )
+                lines = [header]
+                if tpl['tp_price'] and tpl['previous_tp_price']:
+                    lines.append(render_template("scalp.tp_sl.tp_update_line", lang, tpl, fallback_lang='en') or f"✅TP Price: ${tpl['previous_tp_price']} change to ${tpl['tp_price']}")
+                elif tpl['tp_price']:
+                    lines.append(render_template("scalp.tp_sl.tp_set_line", lang, tpl, fallback_lang='en') or f"✅TP Price: ${tpl['tp_price']}")
+                if tpl['sl_price'] and tpl['previous_sl_price']:
+                    lines.append(render_template("scalp.tp_sl.sl_update_line", lang, tpl, fallback_lang='en') or f"🛑SL Price: ${tpl['previous_sl_price']} change to ${tpl['sl_price']}")
+                elif tpl['sl_price']:
+                    lines.append(render_template("scalp.tp_sl.sl_set_line", lang, tpl, fallback_lang='en') or f"🛑SL Price: ${tpl['sl_price']}")
+                text = "\n".join(lines)
+            else:
+                text = render_template("scalp.tp_sl.body", lang, tpl, fallback_lang='en') or (
+                    f"⚡️{tpl['trader_name']} TP/SL Setting\n\n"
+                    f"📢{tpl['pair']} {tpl['pair_side']}\n"
+                    f"⏰Time: {tpl['formatted_time']} (UTC+0)"
+                )
+                setting_lines = []
+                if tpl['tp_price']:
+                    setting_lines.append(render_template("scalp.tp_sl.tp_set_line", lang, tpl, fallback_lang='en') or f"✅TP Price: ${tpl['tp_price']}")
+                if tpl['sl_price']:
+                    setting_lines.append(render_template("scalp.tp_sl.sl_set_line", lang, tpl, fallback_lang='en') or f"🛑SL Price: ${tpl['sl_price']}")
+                if setting_lines:
+                    text += "\n" + "\n".join(setting_lines)
+
+            if include_link:
+                more = render_template("copy.open.more", lang, {
+                    "trader_name": tpl['trader_name'],
+                    "detail_url": tpl['trader_detail_url']
+                }, fallback_lang='en') or f"[About {tpl['trader_name']}, more actions>>]({tpl['trader_detail_url']})"
+                text += f"\n\n{more}"
             
             tasks.append(
                 send_telegram_message(
@@ -125,10 +187,19 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
 
         # 同步發送至 Discord Bot
         if DISCORD_BOT_SCALP:
-            await send_discord_message(DISCORD_BOT_SCALP, data)
+            try:
+                first_chat_id, _, _, first_group_lang = push_targets[0]
+                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+                discord_lang = first_group_lang or first_api_lang or 'en'
+            except Exception:
+                discord_lang = 'en'
+            payload = dict(data)
+            payload["lang"] = discord_lang
+            await send_discord_message(DISCORD_BOT_SCALP, payload)
 
     except Exception as e:
         logger.error(f"推送止盈止損更新失敗: {e}")
+
 
 def format_scalp_update_text(data: dict, formatted_time: str, include_link: bool = True) -> str:
     """格式化止盈止損更新文本"""

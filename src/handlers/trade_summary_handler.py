@@ -12,6 +12,7 @@ from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     format_float, format_timestamp_ms_to_utc, create_async_response
 )
+from multilingual_utils import get_preferred_language, render_template
 
 load_dotenv()
 DISCORD_BOT_SUMMARY = os.getenv("DISCORD_BOT_SUMMARY")
@@ -245,14 +246,54 @@ async def process_trade_summary(data: dict, bot: Bot) -> None:
         # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
         seen = set()
-        for chat_id, topic_id, jump in push_targets:
+        for chat_id, topic_id, jump, group_lang in push_targets:
             key = (chat_id, topic_id)
             if key in seen:
                 continue
             seen.add(key)
-            # 根据jump值决定是否包含链接
             include_link = (jump == "1")
-            text = format_trade_summary_text(data, include_link)
+
+            # 語言
+            api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+            lang = group_lang or api_lang or 'en'
+            logger.info(f"[i18n] trade_summary chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+            # 文案映射與數值
+            pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
+            margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
+            pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+            margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
+            formatted_time = format_timestamp_ms_to_utc(data.get('close_time'))
+
+            tpl = {
+                "trader_name": data.get('trader_name', 'Trader'),
+                "pair": data.get('pair', ''),
+                "pair_side": pair_side,
+                "margin_type": margin_type,
+                "leverage": format_float(data.get('pair_leverage', 0)),
+                "formatted_time": formatted_time,
+                "realized_pnl": format_float(float(data.get('realized_pnl_percentage', 0)) * 100),
+                "entry_price": str(data.get('entry_price', 0)),
+                "exit_price": str(data.get('exit_price', 0)),
+                "trader_detail_url": data.get('trader_detail_url', ''),
+            }
+
+            text = render_template("trade.close.body", lang, tpl, fallback_lang='en') or (
+                f"⚡️{tpl['trader_name']} Close Position\n\n"
+                f"📢{tpl['pair']} {tpl['margin_type']} {tpl['leverage']}X\n"
+                f"⏰Time: {tpl['formatted_time']} (UTC+0)\n"
+                f"➡️Direction: Close {tpl['pair_side']}\n"
+                f"🙌🏻ROI: {tpl['realized_pnl']}%\n"
+                f"🎯Entry Price: ${tpl['entry_price']}\n"
+                f"💰Exit Price: ${tpl['exit_price']}"
+            )
+
+            if include_link:
+                more = render_template("copy.open.more", lang, {
+                    "trader_name": tpl['trader_name'],
+                    "detail_url": tpl['trader_detail_url']
+                }, fallback_lang='en') or f"[About {tpl['trader_name']}, more actions>>]({tpl['trader_detail_url']})"
+                text += f"\n\n{more}"
             
             tasks.append(
                 send_telegram_message(
@@ -271,7 +312,15 @@ async def process_trade_summary(data: dict, bot: Bot) -> None:
 
         # 同步發送至 Discord Bot
         if DISCORD_BOT_SUMMARY:
-            await send_discord_message(DISCORD_BOT_SUMMARY, data)
+            try:
+                first_chat_id, _, _, first_group_lang = push_targets[0]
+                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+                discord_lang = first_group_lang or first_api_lang or 'en'
+            except Exception:
+                discord_lang = 'en'
+            payload = dict(data)
+            payload["lang"] = discord_lang
+            await send_discord_message(DISCORD_BOT_SUMMARY, payload)
 
     except Exception as e:
         logger.error(f"推送交易總結失敗: {e}")

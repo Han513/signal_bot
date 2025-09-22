@@ -10,6 +10,7 @@ from .common import (
     format_float, create_async_response
 )
 from collections import defaultdict
+from multilingual_utils import get_preferred_language, render_template
 
 load_dotenv()
 DISCORD_BOT_WEEKLY = os.getenv("DISCORD_BOT_WEEKLY")
@@ -73,12 +74,12 @@ def validate_single_weekly_report(data: dict, prefix: str = "") -> None:
 
     # 數值檢查
     try:
-        float(data["total_roi"])
-        float(data["total_pnl"])
-        int(data["total_trades"])
-        int(data["win_trades"])
-        int(data["loss_trades"])
-        float(data["win_rate"])
+        float(data["total_roi"]) 
+        float(data["total_pnl"]) 
+        int(data["total_trades"]) 
+        int(data["win_trades"]) 
+        int(data["loss_trades"]) 
+        float(data["win_rate"]) 
     except (TypeError, ValueError):
         error_msg = "數值欄位必須為正確的數字格式"
         if prefix:
@@ -86,7 +87,7 @@ def validate_single_weekly_report(data: dict, prefix: str = "") -> None:
         raise ValueError(error_msg)
 
     # 驗證勝率範圍
-    win_rate = float(data["win_rate"])
+    win_rate = float(data["win_rate"]) 
     if not (0 <= win_rate <= 100):
         error_msg = "勝率必須在 0-100 之間"
         if prefix:
@@ -133,7 +134,7 @@ async def process_weekly_report_list(data_list: list, bot: Bot) -> None:
             return
 
         # 使用第一個項目的 trader_uid 來獲取推送目標
-        trader_uid = str(data_list[0]["trader_uid"])
+        trader_uid = str(data_list[0]["trader_uid"]) 
         trader_name = data_list[0].get("trader_name", "Unknown")
         
         logger.info(f"[週報] 開始處理 trader: {trader_name} (UID: {trader_uid})")
@@ -158,14 +159,59 @@ async def process_weekly_report_list(data_list: list, bot: Bot) -> None:
         # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
         seen = set()
-        for chat_id, topic_id, jump in push_targets:
+        for chat_id, topic_id, jump, group_lang in push_targets:
             key = (chat_id, topic_id)
             if key in seen:
                 continue
             seen.add(key)
-            # 根据jump值决定是否包含链接
             include_link = (jump == "1")
-            caption = format_weekly_report_list_text(data_list, include_link)
+
+            # 語言
+            api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+            lang = group_lang or api_lang or 'en'
+            logger.info(f"[i18n] weekly(list) chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+            # 拼接列表文本
+            header = render_template("weekly.report.header", lang, {"trader_name": trader_name}, fallback_lang='en') or f"⚡️{trader_name} Weekly Performance Report"
+            parts = [header, ""]
+            for i, data in enumerate(data_list, 1):
+                total_trades = int(data.get("total_trades", 0))
+                win_trades = int(data.get("win_trades", 0))
+                loss_trades = total_trades - win_trades
+                total_roi = format_float(float(data.get("total_roi", 0)) * 100)
+                win_rate = format_float(float(data.get("win_rate", 0)) * 100)
+                roi_emoji = "🔥" if float(data.get("total_roi", 0)) >= 0 else "📉"
+
+                tpl = {
+                    "rank": i,
+                    "trader_name": data.get('trader_name', 'Trader'),
+                    "total_trades": total_trades,
+                    "win_trades": win_trades,
+                    "loss_trades": loss_trades,
+                    "total_roi": total_roi,
+                    "win_rate": win_rate,
+                    "roi_emoji": roi_emoji,
+                }
+
+                item = render_template("weekly.rank.item", lang, tpl, fallback_lang='en') or (
+                    f"**{i}. {tpl['trader_name']}**\n"
+                    f"{tpl['roi_emoji']} TOTAL R: {tpl['total_roi']}%\n"
+                    f"📈 Total Trades: {tpl['total_trades']}\n"
+                    f"✅ Wins: {tpl['win_trades']}\n"
+                    f"❌ Losses: {tpl['loss_trades']}\n"
+                    f"🏆 Win Rate: {tpl['win_rate']}%\n"
+                )
+                parts.append(item)
+                parts.append("")
+
+            caption = "\n".join(parts).rstrip('\n')
+
+            if include_link:
+                more = render_template("copy.open.more", lang, {
+                    "trader_name": trader_name,
+                    "detail_url": data_list[0].get('trader_detail_url', '')
+                }, fallback_lang='en') or f"[About {trader_name}, more actions>>]({data_list[0].get('trader_detail_url', '')})"
+                caption += f"\n\n{more}"
             logger.info(f"[週報] 準備發送到: chat_id={chat_id}, topic_id={topic_id}, jump={jump}")
             logger.info(f"[週報] 消息長度: {len(caption)} 字符")
             
@@ -217,7 +263,13 @@ async def process_weekly_report_list(data_list: list, bot: Bot) -> None:
         if DISCORD_BOT_WEEKLY:
             logger.info(f"[週報] 準備發送到 Discord Bot")
             try:
-                await send_discord_message(DISCORD_BOT_WEEKLY, data_list[0])
+                # 取語言：使用第一個目標語言或 API fallback
+                first_chat_id, _, _, first_group_lang = push_targets[0]
+                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+                discord_lang = first_group_lang or first_api_lang or 'en'
+                payload = dict(data_list[0])
+                payload["lang"] = discord_lang
+                await send_discord_message(DISCORD_BOT_WEEKLY, payload)
                 logger.info(f"[週報] Discord Bot 發送成功")
             except Exception as e:
                 logger.error(f"[週報] Discord Bot 發送失敗: {e}")
@@ -243,7 +295,7 @@ async def process_single_weekly_report(data: dict, bot: Bot) -> None:
     """處理單個週報項目"""
     img_path = None
     try:
-        trader_uid = str(data["trader_uid"])
+        trader_uid = str(data["trader_uid"]) 
         trader_name = data.get("trader_name", "Unknown")
         
         logger.info(f"[週報] 開始處理單個 trader: {trader_name} (UID: {trader_uid})")
@@ -268,14 +320,52 @@ async def process_single_weekly_report(data: dict, bot: Bot) -> None:
         # 準備發送任務（以 (chat_id, topic_id) 去重）
         tasks = []
         seen = set()
-        for chat_id, topic_id, jump in push_targets:
+        for chat_id, topic_id, jump, group_lang in push_targets:
             key = (chat_id, topic_id)
             if key in seen:
                 continue
             seen.add(key)
-            # 根据jump值决定是否包含链接
             include_link = (jump == "1")
-            caption = format_weekly_report_text(data, include_link)
+
+            # 語言
+            api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
+            lang = group_lang or api_lang or 'en'
+            logger.info(f"[i18n] weekly(single) chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
+
+            # 文案與數值
+            total_trades = int(data.get("total_trades", 0))
+            win_trades = int(data.get("win_trades", 0))
+            loss_trades = total_trades - win_trades
+            total_roi = format_float(float(data.get("total_roi", 0)) * 100)
+            win_rate = format_float(float(data.get("win_rate", 0)) * 100)
+            roi_emoji = "🔥" if float(data.get("total_roi", 0)) >= 0 else "📉"
+
+            tpl = {
+                "trader_name": data.get('trader_name', 'Trader'),
+                "total_trades": total_trades,
+                "win_trades": win_trades,
+                "loss_trades": loss_trades,
+                "total_roi": total_roi,
+                "win_rate": win_rate,
+                "roi_emoji": roi_emoji,
+                "trader_detail_url": data.get('trader_detail_url', ''),
+            }
+
+            caption = render_template("weekly.report.body", lang, tpl, fallback_lang='en') or (
+                f"⚡️{tpl['trader_name']} Weekly Performance Report\n\n"
+                f"{tpl['roi_emoji']} TOTAL R: {tpl['total_roi']}%\n\n"
+                f"📈 Total Trades: {tpl['total_trades']}\n"
+                f"✅ Wins: {tpl['win_trades']}\n"
+                f"❌ Losses: {tpl['loss_trades']}\n"
+                f"🏆 Win Rate: {tpl['win_rate']}%"
+            )
+
+            if include_link:
+                more = render_template("copy.open.more", lang, {
+                    "trader_name": tpl['trader_name'],
+                    "detail_url": tpl['trader_detail_url']
+                }, fallback_lang='en') or f"[About {tpl['trader_name']}, more actions>>]({tpl['trader_detail_url']})"
+                caption += f"\n\n{more}"
             logger.info(f"[週報] 準備發送到: chat_id={chat_id}, topic_id={topic_id}, jump={jump}")
             logger.info(f"[週報] 消息長度: {len(caption)} 字符")
             
@@ -327,7 +417,12 @@ async def process_single_weekly_report(data: dict, bot: Bot) -> None:
         if DISCORD_BOT_WEEKLY:
             logger.info(f"[週報] 準備發送到 Discord Bot")
             try:
-                await send_discord_message(DISCORD_BOT_WEEKLY, data)
+                first_chat_id, _, _, first_group_lang = push_targets[0]
+                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
+                discord_lang = first_group_lang or first_api_lang or 'en'
+                payload = dict(data)
+                payload["lang"] = discord_lang
+                await send_discord_message(DISCORD_BOT_WEEKLY, payload)
                 logger.info(f"[週報] Discord Bot 發送成功")
             except Exception as e:
                 logger.error(f"[週報] Discord Bot 發送失敗: {e}")
@@ -348,6 +443,7 @@ async def process_single_weekly_report(data: dict, bot: Bot) -> None:
                     logger.debug(f"[週報] 已清理临时图片: {img_path}")
             except Exception as e:
                 logger.warning(f"[週報] 清理临时图片失败: {e}")
+
 
 def format_weekly_report_text(data: dict, include_link: bool = True) -> str:
     """格式化週報文本"""

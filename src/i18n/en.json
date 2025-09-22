@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️**{trader_name}** New Trade Open\n\n📢{pair} {margin_type} {leverage}X\n\n⏰Time: {formatted_time} (UTC+0)\n➡️Direction: {pair_type} {pair_side}\n🎯Entry Price: ${entry_price}",
+      "more": "[About {trader_name}, more actions>>]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️{trader_name} Trading Summary (Updated every 12 hours)\n\n📢{pair} {margin_type} {leverage}X\n➡️Direction: {pair_side}\n🎯Entry Price: ${entry_price}\n📊Current Price: ${current_price}\n🚀ROI: {roi}%",
+      "header": "⚡️{trader_name} Trading Summary (Updated every 12 hours)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️Direction: {pair_side}\n🎯Entry Price: ${entry_price}\n📊Current Price: ${current_price}\n🚀ROI: {roi}%",
+      "tp_line": "✅TP Price: ${tp_price}",
+      "sl_line": "🛑SL Price: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️{trader_name} Close Position\n\n📢{pair} {margin_type} {leverage}X\n⏰Time: {formatted_time} (UTC+0)\n➡️Direction: Close {pair_side}\n🙌🏻ROI: {realized_pnl}%\n🎯Entry Price: ${entry_price}\n💰Exit Price: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️{trader_name} TP/SL Setting\n\n📢{pair} {pair_side}\n⏰Time: {formatted_time} (UTC+0)",
+      "update_header": "⚡️{trader_name} TP/SL Update\n\n📢{pair} {pair_side}\n⏰Time: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅TP Price: ${previous_tp_price} change to ${tp_price}",
+      "tp_set_line": "✅TP Price: ${tp_price}",
+      "sl_update_line": "🛑SL Price: ${previous_sl_price} change to ${sl_price}",
+      "sl_set_line": "🛑SL Price: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️{trader_name} Weekly Performance Report",
+      "body": "⚡️{trader_name} Weekly Performance Report\n\n{roi_emoji} TOTAL R: {total_roi}%\n\n📈 Total Trades: {total_trades}\n✅ Wins: {win_trades}\n❌ Losses: {loss_trades}\n🏆 Win Rate: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n{roi_emoji} TOTAL R: {total_roi}%\n📈 Total Trades: {total_trades}\n✅ Wins: {win_trades}\n❌ Losses: {loss_trades}\n🏆 Win Rate: {win_rate}%\n"
+    }
+  }
+} 
