@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": " {trader_name} فتح صفقة جديدة ⚡️\n\n📢{pair} {margin_type} {leverage}X\n⏰ الوقت: {formatted_time} (UTC+0)\n➡️ الاتجاه: {pair_side}\n🎯  : ${entry_price}",
+      "more": "[حول {trader_name}، المزيد من الإجراءات >> (الرابط)]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "{trader_name} ملخص التداول (يُحدَّث كل 12 ساعة) ⚡️\n\n📢{pair} {margin_type} {leverage}X\n➡️ الاتجاه: {pair_side}\n🎯  : ${entry_price}\n📊  : ${current_price}\n🚀 العائد على الاستثمار 🚀 {roi}%",
+      "header": "{trader_name} ملخص التداول (يُحدَّث كل 12 ساعة) ⚡️",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ الاتجاه: {pair_side}\n🎯  : ${entry_price}\n📊  : ${current_price}\n🚀 العائد على الاستثمار 🚀 {roi}%",
+      "tp_line": "✅ سعر جني الأرباح: ${tp_price}",
+      "sl_line": "🛑  : ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} إغلاق الصفقة\n\n📢{pair} {margin_type} {leverage}X\n⏰ الوقت: {formatted_time} (UTC+0)\n➡️ الاتجاه: {pair_side}\n🙌🏻 العائد على الاستثمار 🙌🏻 {realized_pnl}%\n🎯 : ${entry_price}\n💰 : ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": " {trader_name} لـ TP/SL إعداد  ⚡️\n\n📢{pair} {pair_side}\n⏰ الوقت: {formatted_time} (UTC+0)",
+      "update_header": " {trader_name} لـ TP/SL تحديث  ⚡️\n\n📢{pair} {pair_side}\n⏰ الوقت: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} تغير إلى ${tp_price}:",
+      "tp_set_line": "✅ سعر جني الأرباح: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} تغير إلى ${sl_price}:",
+      "sl_set_line": "🛑 سعر إيقاف الخسارة: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} تقرير الأداء الأسبوعي",
+      "body": "⚡️ {trader_name} تقرير الأداء الأسبوعي\n\n🔥 : {total_roi}%\n\n📈  : {total_trades}\n✅ الصفقات الرابحة: {win_trades}\n❌ الصفقات الخاسرة: {loss_trades}\n🏆 : {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 : {total_roi}%\n📈  : {total_trades}\n✅ الصفقات الرابحة: {win_trades}\n❌ الصفقات الخاسرة: {loss_trades}\n🏆 : {win_rate}%\n"
+    }
+  }
+}

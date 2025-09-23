@@ -61,6 +61,24 @@ _TEMPLATE_LANG_TO_FILE = {
     'en': 'en.json',
     'zh-TW': 'zh-TW.json',
     'zh-CN': 'zh-CN.json',
+    # 擴充其餘語言模板
+    'ru': 'ru.json',
+    'id': 'id.json',
+    'ja': 'ja.json',
+    'pt': 'pt.json',
+    'fr': 'fr.json',
+    'es': 'es.json',
+    'tr': 'tr.json',
+    'de': 'de.json',
+    'it': 'it.json',
+    'ar': 'ar.json',
+    'fa': 'fa.json',
+    'vi': 'vi.json',
+    'tl': 'tl.json',
+    'th': 'th.json',
+    'da': 'da.json',
+    'pl': 'pl.json',
+    'ko': 'ko.json',
 }
 
 # 語言偏好快取（LRU 簡化：使用 dict + TTL）
@@ -132,18 +150,10 @@ async def fetch_language_from_api(user_id: Optional[str] = None, chat_id: Option
                     return None
                 data = await resp.json()
                 lang = data.get('lang') or data.get('language')
-                # 正規化為我們的模板簡碼
                 if not lang:
                     return None
-                lang = str(lang)
-                # 常見替代碼轉換
-                if lang in ('en_US', 'en-Us', 'en-US'):
-                    return 'en'
-                if lang in ('zh_TW', 'zh-Hant', 'zh-HK'):
-                    return 'zh-TW'
-                if lang in ('zh_CN', 'zh-Hans'):
-                    return 'zh-CN'
-                return lang
+                # 使用統一正規化，支援所有語言與變體（en/zh-CN/zh-TW/ru/id/ja/...）
+                return _normalize_template_lang_code(str(lang))
     except Exception as e:
         logger.warning(f"fetch_language_from_api failed: {e}")
         return None
@@ -226,6 +236,76 @@ def escape_markdown_v2(text):
     # 在 MarkdownV2 中，換行符需要保持原樣
     return text
 
+
+def _normalize_template_lang_code(lang: str) -> str:
+    """將外部語言簡碼正規化為模板檔案使用的簡碼。
+    支援：en/zh-TW/zh-CN/ru/id/ja/pt/fr/es/tr/de/it/ar/fa/vi/tl/th/da/pl/ko。
+    """
+    if not lang:
+        return 'en'
+    raw = str(lang).strip()
+    if raw in ('en', 'en_US', 'en-US', 'en-Us'):
+        return 'en'
+    if raw in ('zh_TW', 'zh-TW', 'zh-Hant', 'zh-HK'):
+        return 'zh-TW'
+    if raw in ('zh_CN', 'zh-CN', 'zh-Hans'):
+        return 'zh-CN'
+    if raw == 'zh':
+        return 'zh-CN'
+
+    code = raw.replace('_', '-').lower()
+    primary = code.split('-')[0]
+    if primary == 'in':
+        primary = 'id'
+    supported = {
+        'ru','id','ja','pt','fr','es','tr','de','it','ar','fa','vi','tl','th','da','pl','ko'
+    }
+    if primary in supported:
+        return primary
+    return 'en'
+
+
+def localize_pair_side(lang: str, pair_side_code) -> str:
+    """將方向 1/2 或 long/short 依語言本地化。
+    Args:
+        lang: 語言碼（en/zh-TW/zh-CN 等）
+        pair_side_code: '1' 或 '2'（也接受 1/2 或 'Long'/'Short'）
+    Returns:
+        本地化後的方向字串。
+    """
+    lang_key = _normalize_template_lang_code(lang)
+    # 標準化代碼
+    val = str(pair_side_code).strip().lower()
+    if val in ('1', 'long', 'buy', 'open_long'):
+        key = 'long'
+    elif val in ('2', 'short', 'sell', 'open_short'):
+        key = 'short'
+    else:
+        key = 'long'
+
+    mapping = {
+        'en': {'long': 'Long', 'short': 'Short'},
+        'zh-CN': {'long': '多', 'short': '空'},
+        'zh-TW': {'long': '多', 'short': '空'},
+        'ja': {'long': 'ロング', 'short': 'ショート'},
+        'ar': {'long': 'طويل', 'short': 'قصير'},
+        'ru': {'long': 'Лонг', 'short': 'Шорт'},
+        'id': {'long': 'Long', 'short': 'Pendek'},
+        'pt': {'long': 'Longo', 'short': 'Curto'},
+        'fr': {'long': 'Long', 'short': 'Court'},
+        'es': {'long': 'Largo', 'short': 'Corto'},
+        'tr': {'long': 'Uzun', 'short': 'Kısa'},
+        'de': {'long': 'Lang', 'short': 'Kurz'},
+        'it': {'long': 'Lungo', 'short': 'Corto'},
+        'fa': {'long': 'لانگ', 'short': 'شورت'},
+        'vi': {'long': 'Dài', 'short': 'Ngắn'},
+        'tl': {'long': 'Long', 'short': 'Short'},
+        'th': {'long': 'ยาว', 'short': 'สั้น'},
+        'da': {'long': 'Lang', 'short': 'Kort'},
+        'pl': {'long': 'Długo', 'short': 'Krótko'},
+        'ko': {'long': '롱', 'short': '숏'},
+    }
+    return mapping.get(lang_key, mapping['en'])[key]
 
 def get_multilingual_content(post, lang):
     """

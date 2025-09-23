@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} Ny Handel Abnet\n\n📢{pair} {margin_type} {leverage}X\n⏰ Tid: {formatted_time} (UTC+0)\n➡️ Retning: {pair_side}\n🎯 Indgangspris: ${entry_price}",
+      "more": "[Om {trader_name}, flere handlinger]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} Handelsoversigt (Opdateres hver 12. time)\n\n📢{pair} {margin_type} {leverage}X\n➡️ Retning: {pair_side}\n🎯 Indgangspris: ${entry_price}\n📊 Nuværende pris: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} Handelsoversigt (Opdateres hver 12. time)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ Retning: {pair_side}\n🎯 Indgangspris: ${entry_price}\n📊 Nuværende pris: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ TP-Pris: ${tp_price}",
+      "sl_line": "🛑 SL-Pris: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} Luk Position\n\n📢{pair} {margin_type} {leverage}X\n⏰ Tid: {formatted_time} (UTC+0)\n➡️ Retning: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 Indgangspris: ${entry_price}\n💰 Udgangspris: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} TP/SL-Indstilling\n\n📢{pair} {pair_side}\n⏰ Tid: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} TP/SL-Opdatering\n\n📢{pair} {pair_side}\n⏰ Tid: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} ændret til ${tp_price}:",
+      "tp_set_line": "✅ TP-Pris: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} ændret til ${sl_price}:",
+      "sl_set_line": "🛑 SL-Pris: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} Ugentlig Præstationsrapport",
+      "body": "⚡️ {trader_name} Ugentlig Præstationsrapport\n\n🔥 ROI: {total_roi}%\n\n📈 Samlet antal Handler: {total_trades}\n✅ Gevinster: {win_trades}\n❌ Tab: {loss_trades}\n🏆 Vinderrate: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 Samlet antal Handler: {total_trades}\n✅ Gevinster: {win_trades}\n❌ Tab: {loss_trades}\n🏆 Vinderrate: {win_rate}%\n"
+    }
+  }
+}

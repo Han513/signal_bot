@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} Bagong Trade Na Buksan\n\n📢{pair} {margin_type} {leverage}X\n⏰ Oras: {formatted_time} (UTC+0)\n➡️ Direksyon: {pair_side}\n🎯 Presyo ng Entry: ${entry_price}",
+      "more": "[Tungkol kay {trader_name}, higit pang aksyon]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} Buod ng Trading (Ina-update bawat 12 oras)\n\n📢{pair} {margin_type} {leverage}X\n➡️ Direksyon: {pair_side}\n🎯 Presyo ng Entry: ${entry_price}\n📊 Kasalukuyang Presyo: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} Buod ng Trading (Ina-update bawat 12 oras)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ Direksyon: {pair_side}\n🎯 Presyo ng Entry: ${entry_price}\n📊 Kasalukuyang Presyo: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ Presyo ng TP: ${tp_price}",
+      "sl_line": "🛑 Presyo ng SL: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} Isara ang Posisyon\n\n📢{pair} {margin_type} {leverage}X\n⏰ Oras: {formatted_time} (UTC+0)\n➡️ Direksyon: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 Presyo ng Entry: ${entry_price}\n💰 Presyo ng Exit: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} TP/SL Setting\n\n📢{pair} {pair_side}\n⏰ Oras: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} TP/SL Update\n\n📢{pair} {pair_side}\n⏰ Oras: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} naging ${tp_price}:",
+      "tp_set_line": "✅ Presyo ng TP: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} naging ${sl_price}:",
+      "sl_set_line": "🛑 Presyo ng SL: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} Lingguhang Performance Report",
+      "body": "⚡️ {trader_name} Lingguhang Performance Report\n\n🔥 ROI: {total_roi}%\n\n📈 Kabuuang Trades: {total_trades}\n✅ Panalo: {win_trades}\n❌ Talo: {loss_trades}\n🏆 Win Rate: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 Kabuuang Trades: {total_trades}\n✅ Panalo: {win_trades}\n❌ Talo: {loss_trades}\n🏆 Win Rate: {win_rate}%\n"
+    }
+  }
+}

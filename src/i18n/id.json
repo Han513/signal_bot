@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} Buka Transaksi Baru\n\n📢{pair} {margin_type} {leverage}X\n⏰ Waktu: {formatted_time} (UTC+0)\n➡️ Arah: {pair_side}\n🎯 Harga Masuk: ${entry_price}",
+      "more": "[Tentang {trader_name}, Aksi lebih lanjut]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} Ringkasan Perdagangan (Diperbarui setiap 12 jam)\n\n📢{pair} {margin_type} {leverage}X\n➡️ Arah: {pair_side}\n🎯 Harga Masuk: ${entry_price}\n📊 Harga Saat Ini: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} Ringkasan Perdagangan (Diperbarui setiap 12 jam)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ Arah: {pair_side}\n🎯 Harga Masuk: ${entry_price}\n📊 Harga Saat Ini: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ Harga TP: ${tp_price}",
+      "sl_line": "🛑 Harga SL: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} Tutup Posisi\n\n📢{pair} {margin_type} {leverage}X\n⏰ Waktu: {formatted_time} (UTC+0)\n➡️ Arah: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 Harga Masuk: ${entry_price}\n💰 Harga Keluar: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} Pengaturan TP/SL\n\n📢{pair} {pair_side}\n⏰ Waktu: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} Update TP/SL\n\n📢{pair} {pair_side}\n⏰ Waktu: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} ubah menjadi  ${tp_price}:",
+      "tp_set_line": "✅ Harga TP: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} ubah menjadi ${sl_price}:",
+      "sl_set_line": "🛑 Harga SL: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} Report Performa Mingguan",
+      "body": "⚡️ {trader_name} Report Performa Mingguan\n\n🔥 ROI: {total_roi}%\n\n📈 Total Perdagangan: {total_trades}\n✅ Wins: {win_trades}\n❌ Losses: {loss_trades}\n🏆 Win Rate: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 Total Perdagangan: {total_trades}\n✅ Wins: {win_trades}\n❌ Losses: {loss_trades}\n🏆 Win Rate: {win_rate}%\n"
+    }
+  }
+}

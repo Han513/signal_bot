@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} 포지션 오픈\n\n📢{pair} {margin_type} {leverage}X\n⏰ 시간: {formatted_time} (UTC+0)\n➡️ 방향: {pair_side}\n🎯 진입 가격: ${entry_price}",
+      "more": "[About {trader_name}, more actions]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} 거래 요약 (12시간 마다 업뎃뎃)\n\n📢{pair} {margin_type} {leverage}X\n➡️ 방향: {pair_side}\n🎯 진입 가격: ${entry_price}\n📊 현재 가격: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} 거래 요약 (12시간 마다 업뎃뎃)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ 방향: {pair_side}\n🎯 진입 가격: ${entry_price}\n📊 현재 가격: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ TP 가격: ${tp_price}",
+      "sl_line": "🛑 SL 가격: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} 포지션 청산\n\n📢{pair} {margin_type} {leverage}X\n⏰ 시간: {formatted_time} (UTC+0)\n➡️ 방향: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 진입 가격: ${entry_price}\n💰 청산 가격격: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} TP/SL 설정\n\n📢{pair} {pair_side}\n⏰ 시간: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} TP/SL 업뎃\n\n📢{pair} {pair_side}\n⏰ 시간: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} , ${tp_price}으로 변경:",
+      "tp_set_line": "✅ TP 가격: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} , ${sl_price}으로 병경경:",
+      "sl_set_line": "🛑 SL 가격: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} 주간 퍼포먼스",
+      "body": "⚡️ {trader_name} 주간 퍼포먼스\n\n🔥 ROI: {total_roi}%\n\n📈 모든 거래: {total_trades}\n✅ 수익: {win_trades}\n❌ 손실: {loss_trades}\n🏆 승률률: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 모든 거래: {total_trades}\n✅ 수익: {win_trades}\n❌ 손실: {loss_trades}\n🏆 승률률: {win_rate}%\n"
+    }
+  }
+}

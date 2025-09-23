@@ -1,41 +1,41 @@
 {
   "copy": {
     "open": {
-      "body": "⚡️**{trader_name}** 新開倉\n\n📢{pair} {margin_type} {leverage}X\n\n⏰時間：{formatted_time} (UTC+0)\n➡️方向：{pair_type} {pair_side}\n🎯進場價：${entry_price}",
-      "more": "[關於 {trader_name}，查看更多操作>>]({detail_url})"
+      "body": "⚡️ {trader_name} 開倉\n\n📢{pair} {margin_type} {leverage}X\n⏰ 時間: {formatted_time} (UTC+0)\n➡️ 方向: {pair_side}\n🎯 開倉價格: ${entry_price}",
+      "more": "[關於 {trader_name}, 更多詳情]({detail_url})"
     }
   },
   "holding": {
     "summary": {
-      "body": "⚡️{trader_name} 持倉摘要（每 12 小時更新）\n\n📢{pair} {margin_type} {leverage}X\n➡️方向：{pair_side}\n🎯進場價：${entry_price}\n📊當前價格：${current_price}\n🚀報酬率：{roi}%",
-      "header": "⚡️{trader_name} 持倉摘要（每 12 小時更新）",
-      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️方向：{pair_side}\n🎯進場價：${entry_price}\n📊當前價格：${current_price}\n🚀報酬率：{roi}%",
-      "tp_line": "✅止盈價格：${tp_price}",
-      "sl_line": "🛑止損價格：${sl_price}"
+      "body": "⚡️ {trader_name} 帶單列表 (每 12 小時更新)\n\n📢{pair} {margin_type} {leverage}X\n➡️ 方向: {pair_side}\n🎯 開倉價格: ${entry_price}\n📊 目前價格: ${current_price}\n🚀 收益率 {roi}%",
+      "header": "⚡️ {trader_name} 帶單列表 (每 12 小時更新)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ 方向: {pair_side}\n🎯 開倉價格: ${entry_price}\n📊 目前價格: ${current_price}\n🚀 收益率 {roi}%",
+      "tp_line": "✅ 止盈價格: ${tp_price}",
+      "sl_line": "🛑 止損價格: ${sl_price}"
     }
   },
   "trade": {
     "close": {
-      "body": "⚡️{trader_name} 平倉\n\n📢{pair} {margin_type} {leverage}X\n⏰時間：{formatted_time} (UTC+0)\n➡️方向：關於 {pair_side} 平倉\n🙌🏻報酬率：{realized_pnl}%\n🎯進場價：${entry_price}\n💰出場價：${exit_price}"
+      "body": "⚡️ {trader_name} 平倉\n\n📢{pair} {margin_type} {leverage}X\n⏰ 時間: {formatted_time} (UTC+0)\n➡️ 方向: {pair_side}\n🙌🏻 收益率 {realized_pnl}%\n🎯 開倉價格: ${entry_price}\n💰 平倉價格: ${exit_price}"
     }
   },
   "scalp": {
     "tp_sl": {
-      "body": "⚡️{trader_name} 設定止盈/止損\n\n📢{pair} {pair_side}\n⏰時間：{formatted_time} (UTC+0)",
-      "update_header": "⚡️{trader_name} 止盈/止損更新\n\n📢{pair} {pair_side}\n⏰時間：{formatted_time} (UTC+0)",
-      "tp_update_line": "✅止盈價格：${previous_tp_price} 調整為 ${tp_price}",
-      "tp_set_line": "✅止盈價格：${tp_price}",
-      "sl_update_line": "🛑止損價格：${previous_sl_price} 調整為 ${sl_price}",
-      "sl_set_line": "🛑止損價格：${sl_price}"
+      "body": "⚡️ {trader_name} 設置止盈止損\n\n📢{pair} {pair_side}\n⏰ 時間: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} 更新止盈止損\n\n📢{pair} {pair_side}\n⏰ 時間: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} 修改為 ${tp_price}:",
+      "tp_set_line": "✅ 止盈價格: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} 修改為 ${sl_price}:",
+      "sl_set_line": "🛑 止損價格: ${sl_price}"
     }
   },
   "weekly": {
     "report": {
-      "header": "⚡️{trader_name} 每週績效報告",
-      "body": "⚡️{trader_name} 每週績效報告\n\n{roi_emoji} 總報酬率：{total_roi}%\n\n📈 交易總數：{total_trades}\n✅ 勝場：{win_trades}\n❌ 敗場：{loss_trades}\n🏆 勝率：{win_rate}%"
+      "header": "⚡️ {trader_name} 本週表現",
+      "body": "⚡️ {trader_name} 本週表現\n\n🔥 收益率: {total_roi}%\n\n📈 帶單筆數: {total_trades}\n✅ 盈利筆數: {win_trades}\n❌ 虧損比數: {loss_trades}\n🏆 勝率: {win_rate}%"
     },
     "rank": {
-      "item": "**{rank}. {trader_name}**\n{roi_emoji} 總報酬率：{total_roi}%\n📈 交易總數：{total_trades}\n✅ 勝場：{win_trades}\n❌ 敗場：{loss_trades}\n🏆 勝率：{win_rate}%\n"
+      "item": "**{rank}. {trader_name}**\n🔥 收益率: {total_roi}%\n📈 帶單筆數: {total_trades}\n✅ 盈利筆數: {win_trades}\n❌ 虧損比數: {loss_trades}\n🏆 勝率: {win_rate}%\n"
     }
   }
-} 
+}

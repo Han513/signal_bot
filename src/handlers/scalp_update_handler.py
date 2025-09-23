@@ -9,7 +9,7 @@ from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     format_timestamp_ms_to_utc, format_float, create_async_response
 )
-from multilingual_utils import get_preferred_language, render_template
+from multilingual_utils import get_preferred_language, render_template, localize_pair_side
 
 load_dotenv()
 DISCORD_BOT_SCALP = os.getenv("DISCORD_BOT_SCALP")
@@ -114,8 +114,7 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
             logger.info(f"[i18n] scalp chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
 
             # 文案映射
-            pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
-            pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+            pair_side = localize_pair_side(lang, data.get("pair_side", ""))
 
             # 判斷是否為更新操作
             has_previous_tp = bool(data.get("previous_tp_price"))
@@ -204,9 +203,7 @@ async def process_scalp_update(data: dict, bot: Bot) -> None:
 def format_scalp_update_text(data: dict, formatted_time: str, include_link: bool = True) -> str:
     """格式化止盈止損更新文本"""
     # 文案映射
-    pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
-    
-    pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+    pair_side = localize_pair_side('en', data.get("pair_side", ""))
     
     # 判斷是否為更新操作（有 previous 價格）
     has_previous_tp = bool(data.get("previous_tp_price"))

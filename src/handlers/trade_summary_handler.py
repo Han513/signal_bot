@@ -12,7 +12,7 @@ from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     format_float, format_timestamp_ms_to_utc, create_async_response
 )
-from multilingual_utils import get_preferred_language, render_template
+from multilingual_utils import get_preferred_language, render_template, localize_pair_side
 
 load_dotenv()
 DISCORD_BOT_SUMMARY = os.getenv("DISCORD_BOT_SUMMARY")
@@ -89,7 +89,7 @@ def format_trade_summary_text(data: dict, include_link: bool = True) -> str:
     pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
     margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
     
-    pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+    pair_side = localize_pair_side('en', data.get("pair_side", ""))
     margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
     
     # 格式化數值
@@ -259,9 +259,8 @@ async def process_trade_summary(data: dict, bot: Bot) -> None:
             logger.info(f"[i18n] trade_summary chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
 
             # 文案映射與數值
-            pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
             margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
-            pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+            pair_side = localize_pair_side(lang, data.get("pair_side", ""))
             margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
             formatted_time = format_timestamp_ms_to_utc(data.get('close_time'))
 

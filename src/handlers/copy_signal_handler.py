@@ -12,7 +12,7 @@ from .common import (
     generate_trader_summary_image, format_timestamp_ms_to_utc,
     create_async_response, generate_trader_summary_image_async, cleanup_temp_image
 )
-from multilingual_utils import get_preferred_language, render_template
+from multilingual_utils import get_preferred_language, render_template, localize_pair_side
 
 load_dotenv()
 DISCORD_BOT_COPY = os.getenv("DISCORD_BOT_COPY")
@@ -139,14 +139,14 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             if key in seen:
                 continue
             seen.add(key)
-            # 取得映射值
-            pair_type_str = pair_type_map.get(str(data.get("pair_type", "")).lower(), str(data.get("pair_type", "")))
-            pair_side_str = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
-            margin_type_str = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
-
             # 取得語言（若 API/快取失敗將回退 'en'）
             api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
             lang = group_lang or api_lang or 'en'
+            
+            # 取得映射值（依語言本地化方向）
+            pair_type_str = pair_type_map.get(str(data.get("pair_type", "")).lower(), str(data.get("pair_type", "")))
+            pair_side_str = localize_pair_side(lang, data.get("pair_side", ""))
+            margin_type_str = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
             logger.info(f"[i18n] copy chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
 
             # 準備渲染資料

@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} Yeni İşlem Açtı\n\n📢{pair} {margin_type} {leverage}X\n⏰ Zaman: {formatted_time} (UTC+0)\n➡️ Yön: {pair_side}\n🎯 Giriş Fiyatı: ${entry_price}",
+      "more": "[{trader_name} hakkında, daha fazla işlem]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} İşlem Özeti (Her 12 saatte bir güncellenir)\n\n📢{pair} {margin_type} {leverage}X\n➡️ Yön: {pair_side}\n🎯 Giriş Fiyatı: ${entry_price}\n📊 Güncel Fiyat: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} İşlem Özeti (Her 12 saatte bir güncellenir)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ Yön: {pair_side}\n🎯 Giriş Fiyatı: ${entry_price}\n📊 Güncel Fiyat: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ TP Fiyatı: ${tp_price}",
+      "sl_line": "🛑 SL Fiyatı: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} Pozisyonu Kapattı\n\n📢{pair} {margin_type} {leverage}X\n⏰ Zaman: {formatted_time} (UTC+0)\n➡️ Yön: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 Giriş Fiyatı: ${entry_price}\n💰 Çıkış Fiyatı: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} TP/SL Ayarı\n\n📢{pair} {pair_side}\n⏰ Zaman: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} TP/SL Güncellemesi\n\n📢{pair} {pair_side}\n⏰ Zaman: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} değişti → ${tp_price}:",
+      "tp_set_line": "✅ TP Fiyatı: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} değişti → ${sl_price}:",
+      "sl_set_line": "🛑 SL Fiyatı: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} Haftalık Performans Raporu",
+      "body": "⚡️ {trader_name} Haftalık Performans Raporu\n\n🔥 ROI: {total_roi}%\n\n📈 Toplam İşlem: {total_trades}\n✅ Kazançlar: {win_trades}\n❌ Kayıplar: {loss_trades}\n🏆 Kazanma Oranı: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 Toplam İşlem: {total_trades}\n✅ Kazançlar: {win_trades}\n❌ Kayıplar: {loss_trades}\n🏆 Kazanma Oranı: {win_rate}%\n"
+    }
+  }
+}

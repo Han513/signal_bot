@@ -9,7 +9,7 @@ from .common import (
     get_push_targets, send_telegram_message, send_discord_message,
     format_float, create_async_response
 )
-from multilingual_utils import get_preferred_language, render_template
+from multilingual_utils import get_preferred_language, render_template, localize_pair_side
 
 
 def flatten_holding_report_data(data):
@@ -176,7 +176,8 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             
             logger.info(f"[持倉報告] 處理 trader: {trader_name} (UID: {trader_uid})")
             
-            push_targets = await get_push_targets(trader_uid)
+            # 針對持倉報告取用 holding 類型的推送配置
+            push_targets = await get_push_targets(trader_uid, signal_type="holding")
             
             if not push_targets:
                 # logger.info(f"[持倉報告] trader_uid={trader_uid} ({trader_name}) 無推送目標，跳過")
@@ -187,12 +188,14 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             
             seen = set()
             for chat_id, topic_id, jump, group_lang in push_targets:
+                print(f"chat_id: {chat_id}, topic_id: {topic_id}, jump: {jump}, group_lang: {group_lang}")
                 key = (chat_id, topic_id)
                 if key in seen:
                     continue
                 seen.add(key)
                 logger.info(f"[持倉報告] 準備發送到: chat_id={chat_id}, topic_id={topic_id}, jump={jump}")
                 include_link = (jump == "1")
+                logger.info(f"[持倉報告] 是否附加連結 include_link={include_link}")
 
                 # 語言
                 api_lang = await get_preferred_language(user_id=None, chat_id=str(chat_id))
@@ -211,9 +214,8 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
                 parts = [header, ""]
                 for i, data in enumerate(trader.get("infos", []), 1):
                     # 文案映射
-                    pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
                     margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
-                    pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+                    pair_side = localize_pair_side(lang, data.get("pair_side", ""))
                     margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
 
                     tpl = {
@@ -257,6 +259,7 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
                         "detail_url": trader.get('trader_detail_url', '')
                     }, fallback_lang='en') or f"[About {trader_name}, more actions>>]({trader.get('trader_detail_url', '')})"
                     text += f"\n\n{more}"
+                    logger.info(f"[持倉報告] 已附加 more 連結: {more}")
 
                 all_tasks.append(
                     send_telegram_message(
@@ -342,9 +345,8 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
             logger.info(f"[i18n] holding(single) chat_id={chat_id}, topic_id={topic_id}, group_lang={group_lang}, api_lang={api_lang}, resolved={lang}")
 
             # 文案映射
-            pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}
             margin_type_map = {"1": "Cross", "2": "Isolated", 1: "Cross", 2: "Isolated"}
-            pair_side = pair_side_map.get(str(data.get("pair_side", "")), str(data.get("pair_side", "")))
+            pair_side = localize_pair_side(lang, data.get("pair_side", ""))
             margin_type = margin_type_map.get(str(data.get("pair_margin_type", "")), str(data.get("pair_margin_type", "")))
 
             tpl = {
@@ -416,7 +418,7 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
     except Exception as e:
         logger.error(f"推送單個持倉報告失敗: {e}")
 
-def format_holding_report_text(data: dict, include_link: bool = True) -> str:
+def format_holding_report_text(data: dict, include_link: bool = False) -> str:
     """格式化持倉報告文本"""
     # 文案映射
     pair_side_map = {"1": "Long", "2": "Short", 1: "Long", 2: "Short"}

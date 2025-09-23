@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} Nowa Transakcja Otwarta\n\n📢{pair} {margin_type} {leverage}X\n⏰ Czas: {formatted_time} (UTC+0)\n➡️ Kierunek: {pair_side}\n🎯 Cena Wejścia: ${entry_price}",
+      "more": "[O {trader_name}, więcej akcji]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} Podsumowanie Handlu (Aktualizowane co 12 godziny)\n\n📢{pair} {margin_type} {leverage}X\n➡️ Kierunek: {pair_side}\n🎯 Cena Wejścia: ${entry_price}\n📊 Bieżąca Cena: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} Podsumowanie Handlu (Aktualizowane co 12 godziny)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ Kierunek: {pair_side}\n🎯 Cena Wejścia: ${entry_price}\n📊 Bieżąca Cena: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ Cena TP: ${tp_price}",
+      "sl_line": "🛑 Cena SL: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} Zamknij Pozycję\n\n📢{pair} {margin_type} {leverage}X\n⏰ Czas: {formatted_time} (UTC+0)\n➡️ Kierunek: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 Cena Wejścia: ${entry_price}\n💰 Cena Wyjścia: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} Ustawienia TP/SL\n\n📢{pair} {pair_side}\n⏰ Czas: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} Aktualizacja TP/SL\n\n📢{pair} {pair_side}\n⏰ Czas: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} zmieniona na ${tp_price}:",
+      "tp_set_line": "✅ Cena TP: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} zmieniona na ${sl_price}:",
+      "sl_set_line": "🛑 Cena SL: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} Cotygodniowy Raport Wyników",
+      "body": "⚡️ {trader_name} Cotygodniowy Raport Wyników\n\n🔥 ROI: {total_roi}%\n\n📈 Łączna liczba transakcji: {total_trades}\n✅ Wygrane: {win_trades}\n❌ Przegrane: {loss_trades}\n🏆 Wskaźnik Wygranych: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 Łączna liczba transakcji: {total_trades}\n✅ Wygrane: {win_trades}\n❌ Przegrane: {loss_trades}\n🏆 Wskaźnik Wygranych: {win_rate}%\n"
+    }
+  }
+}

@@ -58,16 +58,39 @@ async def cleanup_dedup_cache():
 
 
 def _normalize_template_lang(lang_code: str) -> str:
-    """將外部語言碼轉為模板語言碼：'en' | 'zh-TW' | 'zh-CN' 等。"""
+    """將外部語言碼轉為模板語言碼。
+    支援：en/zh-CN/zh-TW/ru/id/ja/pt/fr/es/tr/de/it/ar/fa/vi/tl/th/da/pl/ko。
+    接受多種變體：下劃線/連字號/區域碼/大小寫混用。
+    """
     if not lang_code:
         return 'en'
-    code = str(lang_code)
-    if code in ('en', 'en_US', 'en-US', 'en-Us'):
+
+    raw = str(lang_code).strip()
+    # 快速命中常見英文與中文變體
+    if raw in ('en', 'en_US', 'en-US', 'en-Us'):
         return 'en'
-    if code in ('zh_CN', 'zh-CN', 'zh-Hans'):
+    if raw in ('zh_CN', 'zh-CN', 'zh-Hans'):
         return 'zh-CN'
-    if code in ('zh_TW', 'zh-TW', 'zh-Hant', 'zh-HK'):
+    if raw in ('zh_TW', 'zh-TW', 'zh-Hant', 'zh-HK'):
         return 'zh-TW'
+    if raw == 'zh':
+        return 'zh-CN'
+
+    # 一般規則：取主標籤（語言部分），再做對應
+    code = raw.replace('_', '-').lower()
+    primary = code.split('-')[0]
+
+    # 舊代碼兼容：印尼語可能為 in 或 id
+    if primary == 'in':
+        primary = 'id'
+
+    supported = {
+        'en', 'ru', 'id', 'ja', 'pt', 'fr', 'es', 'tr', 'de', 'it',
+        'ar', 'fa', 'vi', 'tl', 'th', 'da', 'pl', 'ko'
+    }
+    if primary in supported:
+        return primary
+
     return 'en'
 
 async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
@@ -93,27 +116,44 @@ async def get_push_targets(trader_uid: str, signal_type: str = "copy") -> list:
                     
                 social_data = await resp.json()
         
-        push_targets = []
-        for social in social_data.get("data", []):
-            chat_id = social.get("socialGroup")
-            group_lang = _normalize_template_lang(social.get("lang"))
-            for chat in social.get("chats", []):
-                if (
-                    chat.get("type") == "copy"
-                    and chat.get("enable")
-                    and str(chat.get("traderUid")) == str(trader_uid)
-                ):
-                    topic_id = chat.get("chatId")
-                    jump = str(chat.get("jump", "0"))
-                    if chat_id and topic_id:
-                        push_targets.append((chat_id, int(topic_id), jump, group_lang))
-        # 去除重複的 (chat_id, topic_id, jump, lang) 按 (chat_id, topic_id) 唯一
-        if push_targets:
-            unique = {}
-            for chat_id, topic_id, jump, group_lang in push_targets:
-                unique[(chat_id, topic_id)] = (jump, group_lang)  # 同一 topic 只保留一個
-            push_targets = [(cid, tid, jg[0], jg[1]) for (cid, tid), jg in unique.items()]
-        
+        def collect(filter_type: str):
+            collected = []
+            for social in social_data.get("data", []):
+                chat_id = social.get("socialGroup")
+                group_lang = _normalize_template_lang(social.get("lang"))
+                for chat in social.get("chats", []):
+                    if (
+                        str(chat.get("type", "")).lower() == str(filter_type or "copy").lower()
+                        and chat.get("enable")
+                        and str(chat.get("traderUid")) == str(trader_uid)
+                    ):
+                        topic_id = chat.get("chatId")
+                        raw_jump = chat.get("jump", "0")
+                        if isinstance(raw_jump, bool):
+                            jump = "1" if raw_jump else "0"
+                        elif isinstance(raw_jump, (int, float)):
+                            jump = "1" if int(raw_jump) == 1 else "0"
+                        elif isinstance(raw_jump, str):
+                            val = raw_jump.strip().lower()
+                            jump = "1" if val in {"1", "true", "yes", "y", "on"} else "0"
+                        else:
+                            jump = "0"
+                        if chat_id and topic_id:
+                            collected.append((chat_id, int(topic_id), jump, group_lang))
+            if collected:
+                unique = {}
+                for chat_id, topic_id, jump, group_lang in collected:
+                    unique[(chat_id, topic_id)] = (jump, group_lang)
+                collected = [(cid, tid, jg[0], jg[1]) for (cid, tid), jg in unique.items()]
+            return collected
+
+        # 先嘗試指定類型；若為空且不是 copy，再回退 copy
+        push_targets = collect(signal_type or "copy")
+        if not push_targets and (signal_type or "copy").lower() != "copy":
+            logger.info(f"[get_push_targets] 未找到類型 {signal_type}，回退 copy 類型")
+            push_targets = collect("copy")
+
+        logger.info(f"[get_push_targets] trader_uid={trader_uid}, type={signal_type}, 命中 {len(push_targets)} 個推送目標")
         return push_targets
         
     except Exception as e:

@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} Giao Dịch Mới Mở\n\n📢{pair} {margin_type} {leverage}X\n⏰ Thời gian: {formatted_time} (UTC+0)\n➡️ Hướng: {pair_side}\n🎯 Giá Vào: ${entry_price}",
+      "more": "[Về {trader_name}, thêm hành động]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} Tóm Tắt Giao Dịch (Cập nhật mỗi 12 giờ)\n\n📢{pair} {margin_type} {leverage}X\n➡️ Hướng: {pair_side}\n🎯 Giá Vào: ${entry_price}\n📊 Giá Hiện Tại: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} Tóm Tắt Giao Dịch (Cập nhật mỗi 12 giờ)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ Hướng: {pair_side}\n🎯 Giá Vào: ${entry_price}\n📊 Giá Hiện Tại: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ Giá TP: ${tp_price}",
+      "sl_line": "🛑 Giá SL: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} Đóng Vị Thế\n\n📢{pair} {margin_type} {leverage}X\n⏰ Thời Gian: {formatted_time} (UTC+0)\n➡️ Hướng: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 Giá Vào: ${entry_price}\n💰 Giá Thoát: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} Cài Đặt TP/SL\n\n📢{pair} {pair_side}\n⏰ Thời Gian: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} Cập Nhật TP/SL\n\n📢{pair} {pair_side}\n⏰ Thời Gian: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} đổi thành ${tp_price}:",
+      "tp_set_line": "✅ Giá TP: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} đổi thành ${sl_price}:",
+      "sl_set_line": "🛑 Giá SL: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} Báo Cáo Hiệu Suất Hàng Tuần",
+      "body": "⚡️ {trader_name} Báo Cáo Hiệu Suất Hàng Tuần\n\n🔥 ROI: {total_roi}%\n\n📈 Tổng Số Giao Dịch: {total_trades}\n✅ Thắng: {win_trades}\n❌ Thua: {loss_trades}\n🏆 Tỷ Lệ Thắng: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 Tổng Số Giao Dịch: {total_trades}\n✅ Thắng: {win_trades}\n❌ Thua: {loss_trades}\n🏆 Tỷ Lệ Thắng: {win_rate}%\n"
+    }
+  }
+}

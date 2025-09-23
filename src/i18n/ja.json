@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} 新規取引開始\n\n📢{pair} {margin_type} {leverage}X\n⏰ 時間: {formatted_time} (UTC+0)\n➡️ 方向: {pair_side}\n🎯 エントリー価格: ${entry_price}",
+      "more": "[{trader_name}について, その他の操作はこちら]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} 取引概要（12時間ごとに更新）\n\n📢{pair} {margin_type} {leverage}X\n➡️ 方向: {pair_side}\n🎯 エントリー価格: ${entry_price}\n📊 現在価格: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} 取引概要（12時間ごとに更新）",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ 方向: {pair_side}\n🎯 エントリー価格: ${entry_price}\n📊 現在価格: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ TP 価格: ${tp_price}",
+      "sl_line": "🛑 SL 価格: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} ポジションをクローズ\n\n📢{pair} {margin_type} {leverage}X\n⏰ 時間: {formatted_time} (UTC+0)\n➡️ 方向: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 エントリー価格: ${entry_price}\n💰 決済価格: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} TP/SL 設定\n\n📢{pair} {pair_side}\n⏰ 時間: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} TP/SL 更新\n\n📢{pair} {pair_side}\n⏰ 時間: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} が ${tp_price}に変更:",
+      "tp_set_line": "✅ TP 価格: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} が ${sl_price}に変更:",
+      "sl_set_line": "🛑 SL 価格: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} 週間パフォーマンスレポート",
+      "body": "⚡️ {trader_name} 週間パフォーマンスレポート\n\n🔥 ROI: {total_roi}%\n\n📈 総取引数: {total_trades}\n✅ 勝利: {win_trades}\n❌ 失敗: {loss_trades}\n🏆 勝率: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 総取引数: {total_trades}\n✅ 勝利: {win_trades}\n❌ 失敗: {loss_trades}\n🏆 勝率: {win_rate}%\n"
+    }
+  }
+}

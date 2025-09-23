@@ -1,0 +1,41 @@
+{
+  "copy": {
+    "open": {
+      "body": "⚡️ {trader_name} เปิดการเทรดใหม่\n\n📢{pair} {margin_type} {leverage}X\n⏰ เวลา: {formatted_time} (UTC+0)\n➡️ ทิศทาง: {pair_side}\n🎯 ราคาเข้า: ${entry_price}",
+      "more": "[เกี่ยวกับ {trader_name}, ดำเนินการเพิ่มเติม]({detail_url})"
+    }
+  },
+  "holding": {
+    "summary": {
+      "body": "⚡️ {trader_name} สรุปการเทรด (อัปเดตทุกๆ 12 ชั่วโมง)\n\n📢{pair} {margin_type} {leverage}X\n➡️ ทิศทาง: {pair_side}\n🎯 ราคาเข้า: ${entry_price}\n📊 ราคาปัจจุบัน: ${current_price}\n🚀 ROI {roi}%",
+      "header": "⚡️ {trader_name} สรุปการเทรด (อัปเดตทุกๆ 12 ชั่วโมง)",
+      "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ ทิศทาง: {pair_side}\n🎯 ราคาเข้า: ${entry_price}\n📊 ราคาปัจจุบัน: ${current_price}\n🚀 ROI {roi}%",
+      "tp_line": "✅ ราคา TP: ${tp_price}",
+      "sl_line": "🛑 ราคา SL: ${sl_price}"
+    }
+  },
+  "trade": {
+    "close": {
+      "body": "⚡️ {trader_name} ปิดสถานะ\n\n📢{pair} {margin_type} {leverage}X\n⏰ เวลา: {formatted_time} (UTC+0)\n➡️ ทิศทาง: {pair_side}\n🙌🏻 ROI {realized_pnl}%\n🎯 ราคาเข้า: ${entry_price}\n💰 ราคาปิด: ${exit_price}"
+    }
+  },
+  "scalp": {
+    "tp_sl": {
+      "body": "⚡️ {trader_name} การตั้งค่า TP/SL\n\n📢{pair} {pair_side}\n⏰ เวลา: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} อัปเดต TP/SL\n\n📢{pair} {pair_side}\n⏰ เวลา: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} เปลี่ยนเป็น ${tp_price}:",
+      "tp_set_line": "✅ ราคา TP: ${tp_price}",
+      "sl_update_line": "🛑 ${previous_sl_price} เปลี่ยนเป็น ${sl_price}:",
+      "sl_set_line": "🛑 ราคา SL: ${sl_price}"
+    }
+  },
+  "weekly": {
+    "report": {
+      "header": "⚡️ {trader_name} รายงานผลการเทรดประจำสัปดาห์",
+      "body": "⚡️ {trader_name} รายงานผลการเทรดประจำสัปดาห์\n\n🔥 ROI: {total_roi}%\n\n📈 จำนวนการเทรดทั้งหมด: {total_trades}\n✅ ชนะ: {win_trades}\n❌ แพ้: {loss_trades}\n🏆 อัตราการชนะ: {win_rate}%"
+    },
+    "rank": {
+      "item": "**{rank}. {trader_name}**\n🔥 ROI: {total_roi}%\n📈 จำนวนการเทรดทั้งหมด: {total_trades}\n✅ ชนะ: {win_trades}\n❌ แพ้: {loss_trades}\n🏆 อัตราการชนะ: {win_rate}%\n"
+    }
+  }
+}
