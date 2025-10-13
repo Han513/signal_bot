@@ -104,13 +104,7 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
             logger.warning(f"未找到符合條件的推送頻道: {trader_uid}")
             return
 
-        # 決定 Discord 使用的語言（取第一個推送目標的語言，若無則查 API，再 fallback 英文）
-        try:
-            first_chat_id, _, _, first_group_lang = push_targets[0]
-            first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
-            discord_lang = first_group_lang or first_api_lang or 'en'
-        except Exception:
-            discord_lang = 'en'
+        
 
         # 异步产生交易員統計圖片，使用锁确保线程安全
         # img_path = await generate_trader_summary_image_async(
@@ -194,9 +188,7 @@ async def process_copy_signal(data: dict, bot: Bot) -> None:
 
         # 同步發送至 Discord Bot
         if DISCORD_BOT_COPY:
-            payload = dict(data)
-            payload["lang"] = discord_lang
-            await send_discord_message(DISCORD_BOT_COPY, payload)
+            await send_discord_message(DISCORD_BOT_COPY, dict(data))
 
     except Exception as e:
         logger.error(f"推送 copy signal 失敗: {e}")

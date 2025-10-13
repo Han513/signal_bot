@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} TP/SL 設定\n\n📢{pair} {pair_side}\n⏰ 時間: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} TP/SL 更新\n\n📢{pair} {pair_side}\n⏰ 時間: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} が ${tp_price}に変更:",
+      "tp_update_line": "✅ ${previous_tp_price} が ${tp_price}に変更",
       "tp_set_line": "✅ TP 価格: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} が ${sl_price}に変更:",
+      "sl_update_line": "🛑 ${previous_sl_price} が ${sl_price}に変更",
       "sl_set_line": "🛑 SL 価格: ${sl_price}"
     }
   },

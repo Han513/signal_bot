@@ -6,13 +6,17 @@ import base64
 import tempfile
 import time
 import aiofiles
+import re
 from aiohttp import web
+from typing import Optional
 from functools import partial
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
 from aiogram.types import ChatMemberUpdated, FSInputFile
+from aiogram.types import ForceReply
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramBadRequest
@@ -27,6 +31,8 @@ from handlers.scalp_update_handler import handle_scalp_update
 from handlers.holding_report_handler import handle_holding_report
 from handlers.trade_summary_handler import handle_trade_summary
 from handlers.common import cleanup_dedup_cache
+from multilingual_utils import apply_rtl_if_needed
+from bot_manager import BotManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +52,8 @@ SOCIAL_API = os.getenv("SOCIAL_API")
 MESSAGE_API_URL = os.getenv("MESSAGE_API_URL")
 UPDATE_MESSAGE_API_URL = os.getenv("UPDATE_MESSAGE_API_URL")
 DISCORD_BOT = os.getenv("DISCORD_BOT")
+BOT_REGISTER_API_KEY = os.getenv("BOT_REGISTER_API_KEY")
+DEFAULT_BRAND = os.getenv("DEFAULT_BRAND", "BYD")
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=MemoryStorage())
@@ -53,10 +61,218 @@ dp = Dispatcher(storage=MemoryStorage())
 # 停止信号事件
 stop_event = asyncio.Event()
 router = Router()
+bot_manager = BotManager(shared_router=router)
 group_chat_ids = set()
 verified_users = {}
 
 ALLOWED_ADMIN_IDS = [7067100466, 7257190337, 7182693065]
+
+_VERIFY_PROMPT_MARKER = "[VERIFY_PROMPT]"
+_PENDING_VERIFY_GID = {}
+
+_BOT_NAME_CACHE = {}
+
+async def get_bot_display_name(bot: Bot) -> str:
+    """取得 Bot 顯示名稱（@username 或 first_name），帶快取以降低 API 次數。"""
+    try:
+        bid = bot.id
+    except Exception:
+        return "unknown"
+    name = _BOT_NAME_CACHE.get(bid)
+    if name:
+        return name
+    try:
+        me = await bot.get_me()
+        name = (getattr(me, "username", None) or getattr(me, "first_name", None) or str(bid))
+    except Exception:
+        name = str(bid)
+    _BOT_NAME_CACHE[bid] = name
+    return name
+
+# -------------------- 動態 Bot 持久化（重啟自動恢復） --------------------
+_AGENTS_STORE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run", "bots.json")
+
+def _load_agents_store() -> list:
+    try:
+        path = os.path.abspath(_AGENTS_STORE_PATH)
+        if not os.path.exists(path):
+            return []
+        import json
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or []
+    except Exception as e:
+        logger.error(f"load agents store failed: {e}")
+        return []
+
+def _save_agents_store(items: list) -> None:
+    try:
+        path = os.path.abspath(_AGENTS_STORE_PATH)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        import json
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"save agents store failed: {e}")
+
+def _persist_agent(token: str, brand: str, proxy: Optional[str]) -> None:
+    items = _load_agents_store()
+    # 去重（以 token 為鍵）
+    exists = False
+    for it in items:
+        if it.get("token") == token:
+            it["brand"] = brand
+            it["proxy"] = proxy
+            it["enabled"] = True
+            exists = True
+            break
+    if not exists:
+        items.append({
+            "token": token,
+            "brand": brand,
+            "proxy": proxy,
+            "enabled": True,
+        })
+    _save_agents_store(items)
+
+def _build_agent_router() -> Router:
+    r = Router()
+    # group/private verify
+    r.message.register(handle_verify_command, Command("verify"))
+    r.message.register(handle_private_verify_command, Command("pverify"))
+    r.message.register(handle_verify_shortcut, Command("verify"))
+    # start + free text（menu 已停用）
+    r.message.register(handle_start, Command("start"))
+    r.message.register(show_menu, Command("menu"))
+    r.message.register(handle_private_free_text)
+    # admin utils
+    r.message.register(unban_user, Command("unban"))
+    r.message.register(get_user_id, Command("getid"))
+    # chat member & callbacks
+    r.chat_member.register(handle_chat_member_event)
+    r.my_chat_member.register(handle_my_chat_member)
+    r.callback_query.register(handle_inline_callbacks)
+    return r
+
+async def start_persisted_agents(manager: BotManager):
+    items = _load_agents_store()
+    if not items:
+        logger.info("No persisted agents to restore")
+        return
+    logger.info(f"Restoring {len(items)} persisted agents...")
+    for it in items:
+        try:
+            token = it.get("token")
+            brand = it.get("brand") or DEFAULT_BRAND
+            proxy = it.get("proxy")
+            enabled = bool(it.get("enabled", True))
+            if not enabled or not token or token == TOKEN:
+                continue
+            await bot_manager.register_and_start_bot(
+                token=token,
+                brand=brand,
+                proxy=proxy,
+                heartbeat_coro_factory=lambda b: heartbeat(b, interval=600),
+                periodic_coro_factory=None,
+                max_idle_seconds=None,
+                idle_check_interval=3600,
+                router_factory=_build_agent_router,
+            )
+            logger.info(f"Restored agent bot for brand={brand}")
+        except Exception as e:
+            logger.error(f"Restore agent failed: {e}")
+@router.callback_query()
+async def handle_inline_callbacks(callback: types.CallbackQuery):
+    try:
+        data = callback.data or ""
+        bot_name = await get_bot_display_name(callback.bot)
+        src_text = getattr(callback.message, "text", None) or getattr(callback.message, "caption", "")
+        logger.info(f"[callback] bot={bot_name}({callback.bot.id}) user={callback.from_user.id} data={data} msg_text={src_text!r}")
+        if data.startswith("verify|"):
+            _, verify_group_id = data.split("|", 1)
+            if not verify_group_id:
+                await callback.message.answer("Please provide verify group id with /pverify <verify_group_id> <code>.")
+                await callback.answer()
+                return
+            _PENDING_VERIFY_GID[str(callback.from_user.id)] = verify_group_id
+            logger.info(f"[callback] bot={bot_name} set pending verify_group_id={verify_group_id} for user={callback.from_user.id}")
+            await callback.message.bot.send_message(
+                chat_id=callback.message.chat.id,
+                text="Please enter your UID.",
+                reply_markup=ForceReply(selective=True)
+            )
+            await callback.answer()
+        else:
+            await callback.answer()
+    except Exception as e:
+        logger.error(f"handle_inline_callbacks error: {e}")
+
+async def _perform_private_verify_flow(message: types.Message, verify_group_id: Optional[str], verify_code: str, current_brand: str):
+    """執行私聊驗證流程（PRIVATE 模式）。
+    - 若無 verify_group_id，僅以 botId/botName 與後端溝通，由後端映射到對應群組
+    """
+    try:
+        user_id = str(message.from_user.id)
+        user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
+
+        verification_status = await is_user_verified(user_id, str(verify_group_id), str(verify_code))
+        if verification_status == "warning":
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="<b>This UID has already been verified</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        admin_mention = "admin"
+        bot_name_for_api = await get_bot_display_name(message.bot)
+        verify_payload = {
+            "code": verify_code,
+            "brand": current_brand,
+            "type": "TELEGRAM",
+            "botId": message.bot.id,
+            "botName": bot_name_for_api,
+            "mode": "PRIVATE",
+        }
+        if verify_group_id:
+            verify_payload["verifyGroup"] = verify_group_id
+        async with aiohttp.ClientSession() as session_http:
+            async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
+                response_data = await response.json()
+                if response.status == 200 and "verification successful" in response_data.get("data", ""):
+                    detail_payload = {
+                        "brand": current_brand,
+                        "type": "TELEGRAM",
+                        "botId": message.bot.id,
+                        "botName": bot_name_for_api,
+                        "mode": "PRIVATE",
+                    }
+                    if verify_group_id:
+                        detail_payload["verifyGroup"] = verify_group_id
+                    async with session_http.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
+                        detail_data = await detail_response.json()
+                        verify_group_chat_id = detail_data.get("data", {}).get("verifyGroup")
+                        info_group_chat_id = detail_data.get("data", {}).get("socialGroup")
+
+                    try:
+                        invite_link = await message.bot.create_chat_invite_link(
+                            chat_id=info_group_chat_id,
+                            name=f"Invite for {message.from_user.full_name}",
+                        )
+                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), str(verify_code))
+                        response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
+                        response_data["data"] = response_data["data"].replace("@{username}", user_mention)
+                        # 移除 @{admin} 替換
+                        await message.bot.send_message(chat_id=message.chat.id, text=response_data["data"], parse_mode="HTML")
+                    except Exception as e:
+                        logger.error(f"[pverify] 生成邀请链接失败: {e}")
+                        await message.bot.send_message(chat_id=message.chat.id, text="Verification successful, but an error occurred while generating the invitation link. Please try again later.")
+                else:
+                    error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
+                    # 移除 @{admin} 替換
+                    await message.bot.send_message(chat_id=message.chat.id, text=error_message, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"_perform_private_verify_flow error: {e}")
 
 async def heartbeat(bot: Bot, interval: int = 60):
     """定期向 Telegram 服务器发送心跳请求"""
@@ -156,11 +372,11 @@ async def generate_invite_link(bot: Bot, chat_id: int) -> str:
         logging.error(f"生成邀请链接失败: {e}")
         return None
 
-async def delete_message_after_delay(chat_id: int, message_id: int, delay: int):
-    """延迟删除指定消息"""
+async def delete_message_after_delay(bot: Bot, chat_id: int, message_id: int, delay: int):
+    """延迟删除指定消息（使用傳入的 Bot 實例）"""
     try:
-        await asyncio.sleep(delay)  # 等待指定的时间
-        await bot.delete_message(chat_id=chat_id, message_id=message_id)  # 删除消息
+        await asyncio.sleep(delay)
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
         logger.info(f"消息已成功删除，Chat ID: {chat_id}, Message ID: {message_id}")
     except Exception as e:
         logger.error(f"删除消息时发生错误: {e}")
@@ -170,6 +386,11 @@ async def handle_verify_command(message: types.Message):
     """处理 /verify 指令，并调用 verify 接口"""
 
     try:
+        # 記錄活動
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
         # 尝试删除用户的消息以防止泄露
         # try:
         #     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
@@ -179,7 +400,7 @@ async def handle_verify_command(message: types.Message):
         # 分割指令以提取验证码
         command_parts = message.text.split()
         if len(command_parts) < 2:
-            await bot.send_message(
+            await message.bot.send_message(
                 chat_id=message.chat.id,
                 text="Please provide verification code, for example: /verify 123456"
             )
@@ -187,6 +408,7 @@ async def handle_verify_command(message: types.Message):
 
         verify_code = command_parts[1]
         chat_id = message.chat.id  # 当前群组 ID
+        current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
 
         # 使用 user_id 标记用户
         user_id = str(message.from_user.id)
@@ -205,7 +427,7 @@ async def handle_verify_command(message: types.Message):
 
         # 获取当前群组的 owner 信息
         try:
-            admins = await bot.get_chat_administrators(chat_id)
+            admins = await message.bot.get_chat_administrators(chat_id)
             owner = next(
                 (admin for admin in admins if admin.status == "creator"), None
             )
@@ -221,7 +443,7 @@ async def handle_verify_command(message: types.Message):
         verify_url = "http://172.31.91.67:4070/admin/telegram/social/verify"
         # verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": "BYD", "type": "TELEGRAM"}
+        verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": current_brand, "type": "TELEGRAM"}
 
         async with aiohttp.ClientSession() as session_http:
             async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
@@ -235,13 +457,13 @@ async def handle_verify_command(message: types.Message):
                     # detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
                     detail_url = "http://172.31.91.67:4070/admin/telegram/social/detail"
                     # detail_url = "http://172.25.183.151:4070/admin/telegram/social/detail"
-                    detail_payload = {"verifyGroup": chat_id, "brand": "BYD", "type": "TELEGRAM"}
+                    detail_payload = {"verifyGroup": chat_id, "brand": current_brand, "type": "TELEGRAM"}
                     async with session_http.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
                         detail_data = await detail_response.json()
                         verify_group_chat_id = detail_data.get("data").get("verifyGroup")  # 替换为你的资讯群 ID
                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
                     try:
-                        invite_link = await bot.create_chat_invite_link(
+                        invite_link = await message.bot.create_chat_invite_link(
                             chat_id=info_group_chat_id,
                             name=f"Invite for {message.from_user.full_name}",
                             # member_limit=1,  # 限制链接只能被1人使用
@@ -253,72 +475,316 @@ async def handle_verify_command(message: types.Message):
 
                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
-                        response_data["data"] = response_data["data"].replace("@{admin}", admin_mention)
-                        response_message  = await bot.send_message(
+                        # 移除 @{admin} 替換
+                        response_message  = await message.bot.send_message(
                             chat_id=message.chat.id,
                             text=response_data["data"],
                             parse_mode="HTML"
                         )
-                        asyncio.create_task(delete_message_after_delay(response_message.chat.id, response_message.message_id, 60))
+                        asyncio.create_task(delete_message_after_delay(message.bot, response_message.chat.id, response_message.message_id, 60))
                         logger.info(f"消息已发送并将在 10 分钟后自动删除，消息 ID: {response_message.message_id}")
 
                     except Exception as e:
                         logger.error(f"生成邀请链接失败: {e}")
-                        await bot.send_message(
+                        await message.bot.send_message(
                             chat_id=message.chat.id,
                             text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
                         )
                 else:
                     # 将接口的返回数据直接返回给用户
                     error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
-                    error_message = error_message.replace("@{admin}", admin_mention)
-                    await bot.send_message(
+                    # 移除 @{admin} 替換
+                    await message.bot.send_message(
                         chat_id=message.chat.id,
                         text=error_message,
                         parse_mode="HTML"
                     )
     except Exception as e:
         logger.error(f"调用验证 API 时出错: {e}")
-        await bot.send_message(
+        await message.bot.send_message(
             chat_id=message.chat.id,
             text="验证时发生错误，请稍后再试。"
         )
 
-# @router.message(Command("unban"))
-# async def unban_user(message: types.Message):
-#     """解除特定用户的 ban 状态"""
-#     try:
-#         # 检查是否为允许使用该命令的管理员
-#         if message.from_user.id not in ALLOWED_ADMIN_IDS:
-#             await message.reply("❌ You do not have permission to use this command.")
-#             return
+@router.message(Command("pverify"))
+async def handle_private_verify_command(message: types.Message):
+    """私聊驗證：/pverify <verify_group_id> <code>，僅允許在私聊使用。"""
+    try:
+        # 記錄活動
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
+        if message.chat.type != "private":
+            await message.reply("This command can only be used in private chat.")
+            return
 
-#         # 提取命令中的用户 ID
-#         command_parts = message.text.split()
-#         if len(command_parts) < 2:
-#             await message.reply("❓ Please provide the user ID who needs to be unbanned. For example: /unban 123456789")
-#             return
+        parts = message.text.split()
+        if len(parts) < 3:
+            await message.reply("Usage: /pverify <verify_group_id> <code>")
+            return
 
-#         user_id = int(command_parts[1])  # 从命令中获取目标用户 ID
-#         chat_id = message.chat.id  # 当前群组 ID
+        verify_group_id = parts[1]
+        verify_code = parts[2]
+        current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
 
-#         # 尝试解除 ban
-#         await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
-#         await message.reply(f"✅ User {user_id} has been successfully unbanned.")
-#         logger.info(f"管理员 {message.from_user.id} 已成功解除用户 {user_id} 的 ban 状态。")
+        user_id = str(message.from_user.id)
+        user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
 
-#     except TelegramBadRequest as e:
-#         # 如果用户未被 ban 或其他错误
-#         await message.reply(f"⚠️ {user_id} has not been banned")
-#         logger.error(f"解除用户 {user_id} 的 ban 状态时发生错误：{e}")
-#     except Exception as e:
-#         await message.reply(f"❌ An unknown error occurred while lifting the ban, please try again later.")
-#         logger.error(f"处理 /unban 命令时发生错误：{e}")
+        # 檢查 UID 是否已被其他人使用
+        verification_status = await is_user_verified(user_id, str(verify_group_id), str(verify_code))
+        if verification_status == "warning":
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="<b>This UID has already been verified</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        admin_mention = "@admin"  # 私聊情境無法取得群擁有者
+
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        bot_name_for_api = await get_bot_display_name(message.bot)
+        verify_payload = {
+            "code": verify_code,
+            "brand": current_brand,
+            "type": "TELEGRAM",
+            "botId": message.bot.id,
+            "botName": bot_name_for_api,
+            "mode": "PRIVATE",
+        }
+        if verify_group_id:
+            verify_payload["verifyGroup"] = verify_group_id
+
+        async with aiohttp.ClientSession() as session_http:
+            async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
+                response_data = await response.json()
+                logger.info(f"[pverify] Verify API Response: {response_data}")
+
+                if response.status == 200 and "verification successful" in response_data.get("data", ""):
+                    detail_payload = {
+                        "brand": current_brand,
+                        "type": "TELEGRAM",
+                        "botId": message.bot.id,
+                        "botName": bot_name_for_api,
+                        "mode": "PRIVATE",
+                    }
+                    if verify_group_id:
+                        detail_payload["verifyGroup"] = verify_group_id
+                    async with session_http.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
+                        detail_data = await detail_response.json()
+                        verify_group_chat_id = detail_data.get("data").get("verifyGroup")
+                        info_group_chat_id = detail_data.get("data").get("socialGroup")
+
+                    try:
+                        invite_link = await message.bot.create_chat_invite_link(
+                            chat_id=info_group_chat_id,
+                            name=f"Invite for {message.from_user.full_name}",
+                        )
+
+                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), str(verify_code))
+
+                        response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
+                        response_data["data"] = response_data["data"].replace("@{username}", user_mention)
+                        # 移除 @{admin} 替換
+
+                        await message.bot.send_message(
+                            chat_id=message.chat.id,
+                            text=response_data["data"],
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.error(f"[pverify] 生成邀请链接失败: {e}")
+                        await message.bot.send_message(
+                            chat_id=message.chat.id,
+                            text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
+                        )
+                else:
+                    error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
+                    # 移除 @{admin} 替換
+                    await message.bot.send_message(
+                        chat_id=message.chat.id,
+                        text=error_message,
+                        parse_mode="HTML"
+                    )
+    except Exception as e:
+        logger.error(f"[pverify] 調用驗證 API 時出錯: {e}")
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text="验证时发生错误，请稍后再试。"
+        )
+
+@router.message(Command("verify"))
+async def handle_verify_shortcut(message: types.Message):
+    """允許在私聊使用 /verify <code> 作為快速驗證入口（兼容需求）。"""
+    try:
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
+
+        if message.chat.type != "private":
+            return  # 保留原本群組 /verify
+
+        parts = message.text.split()
+        if len(parts) < 2:
+            await message.reply("Usage: /verify <code>")
+            return
+
+        # 轉呼叫 /pverify 流程（需要 verify_group_id，若未綁定則提示）
+        await message.reply("Please use /pverify <verify_group_id> <code>")
+    except Exception as e:
+        logger.error(f"handle_verify_shortcut error: {e}")
+
+
+@router.message(Command("menu"))
+async def show_menu(message: types.Message):
+    """已停用：不再顯示 menu，回覆簡短提示。"""
+    try:
+        if message.chat.type != "private":
+            return
+        await message.bot.send_message(chat_id=message.chat.id, text="Please press /start to begin verification.")
+    except Exception as e:
+        logger.error(f"show_menu error: {e}")
+
+
+@router.message(Command("start"))
+async def handle_start(message: types.Message):
+    """私聊點擊 /start 時給歡迎語與一鍵驗證按鈕。"""
+    try:
+        if message.chat.type != "private":
+            return
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
+
+        current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+
+        # 先嘗試私聊模式的歡迎語：以 botId/botName 溝通
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        chosen_verify_group = None
+        welcome_message = None
+        try:
+            bot_name_for_api = await get_bot_display_name(message.bot)
+            payload_private = {
+                "brand": current_brand,
+                "type": "TELEGRAM",
+                "botId": message.bot.id,
+                "botName": bot_name_for_api,
+                "mode": "PRIVATE",
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(WELCOME_API, headers=headers, data=payload_private) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # 允許後端回傳 data（歡迎語），可選回傳 verifyGroup
+                        if data.get("data"):
+                            welcome_message = data.get("data")
+                            chosen_verify_group = (data.get("verifyGroup") or data.get("data", {}).get("verifyGroup") or None)
+        except Exception:
+            pass
+
+        # 若私聊模式未取到，退回群組模式（遍歷已知 verify 群）
+        if not welcome_message:
+            for gid in list(group_chat_ids):
+                payload = {"verifyGroup": str(gid), "brand": current_brand, "type": "TELEGRAM"}
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(WELCOME_API, headers=headers, data=payload) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                if data.get("data"):
+                                    chosen_verify_group = str(gid)
+                                    welcome_message = data.get("data")
+                                    break
+                except Exception:
+                    continue
+
+        # 構建 Verify 按鈕（帶 verifyGroup 提示）
+        verify_callback = f"verify|{chosen_verify_group or ''}"
+        inline_kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Verify", callback_data=verify_callback)]]
+        )
+        bot_name = await get_bot_display_name(message.bot)
+        logger.info(f"[start] bot={bot_name}({message.bot.id}) built verify button with callback={verify_callback}")
+
+        # 替換 username 並修正不合法的 <code> 標籤
+        user_mention = f'<a href="tg://user?id={message.from_user.id}">{message.from_user.full_name}</a>'
+        if welcome_message:
+            safe_text = welcome_message.replace("@{username}", user_mention)
+            safe_text = safe_text.replace("<code>", "`").replace("</code>", "`")
+            await message.bot.send_message(chat_id=message.chat.id, text=safe_text, parse_mode="HTML", reply_markup=inline_kb)
+        else:
+            fallback = (
+                f"Welcome! You are chatting with the {current_brand} verification bot.\n\n"
+                "Tap the Verify button below to start verification."
+            )
+            await message.bot.send_message(chat_id=message.chat.id, text=fallback, reply_markup=inline_kb)
+    except Exception as e:
+        logger.error(f"handle_start error: {e}")
+
+
+@router.message()
+async def handle_private_free_text(message: types.Message):
+    """
+    私聊自由輸入處理：
+    1) /verify <digits> 視為驗證請求（已由 handle_verify_shortcut 引導，這裡防禦性處理）
+    2) 純數字 => 視為驗證請求
+    3) 無數字 => 忽略
+    4) 混合文字但包含數字 => 視為驗證請求
+    只在私聊觸發，群組交給群內 handler。
+    """
+    try:
+        if message.chat.type != "private":
+            return
+
+        text = (message.text or "").strip()
+        if not text:
+            return
+
+        # 忽略除 /verify,/pverify 以外的命令
+        if text.startswith("/") and not text.lower().startswith("/verify") and not text.lower().startswith("/pverify"):
+            return
+
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
+
+        # 若是我們用 ForceReply 彈出的提示，則更友善地解析
+        is_forced_reply = message.reply_to_message and message.reply_to_message.text and _VERIFY_PROMPT_MARKER in message.reply_to_message.text
+
+        # 如果先前按了 Verify 並記錄 verify_group_id，且此訊息是純數字，則直接驗證
+        pending_gid = _PENDING_VERIFY_GID.get(str(message.from_user.id))
+
+        # 先嘗試從文本擷取數字
+        m = re.search(r"\d{4,}", text)
+        if not m:
+            # 無數字：忽略
+            return
+
+        code = m.group(0)
+        current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+        if pending_gid:
+            await _perform_private_verify_flow(message, pending_gid, code, current_brand)
+            # 清除 pending
+            _PENDING_VERIFY_GID.pop(str(message.from_user.id), None)
+            return
+
+        # 未知 verify_group_id：提示用戶補上
+        await message.bot.send_message(chat_id=message.chat.id, text=("Detected verification code.\nPlease send: /pverify <verify_group_id> " + code))
+    except Exception as e:
+        logger.error(f"handle_private_free_text error: {e}")
 
 @router.message(Command("unban"))
 async def unban_user(message: types.Message):
     """解除特定用户的 ban 状态"""
     try:
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
         # 检查是否为允许使用该命令的管理员
         if message.from_user.id not in ALLOWED_ADMIN_IDS:
             await message.reply("❌ You do not have permission to use this command.")
@@ -335,7 +801,7 @@ async def unban_user(message: types.Message):
 
         # 检查用户是否在群组中
         try:
-            member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            member = await message.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status != "kicked":
                 # 如果用户未被 ban
                 if member.status in ["member", "administrator", "creator"]:
@@ -343,7 +809,7 @@ async def unban_user(message: types.Message):
                     return
                 else:
                     # 其他状态（如已离开群组）
-                    await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+                    await message.bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
                     await message.reply(f"✅ User {user_id} has been unbanned and can rejoin the group.")
                     return
         except TelegramBadRequest:
@@ -351,7 +817,7 @@ async def unban_user(message: types.Message):
             logger.info(f"用户 {user_id} 不在群组中或状态异常，将继续解除 ban。")
 
         # 尝试解除 ban
-        await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+        await message.bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
         await message.reply(f"✅ User {user_id} has been successfully unbanned.")
         logger.info(f"管理员 {message.from_user.id} 已成功解除用户 {user_id} 的 ban 状态。")
 
@@ -366,6 +832,10 @@ async def unban_user(message: types.Message):
 @router.message(Command("getid"))
 async def get_user_id(message: types.Message):
     """返回用户的 Telegram ID"""
+    try:
+        bot_manager.record_activity(message.bot.id)
+    except Exception:
+        pass
     user_id = message.from_user.id  # 获取发送者的用户 ID
     full_name = message.from_user.full_name  # 获取发送者的全名
     username = message.from_user.username  # 获取发送者的用户名（如果有）
@@ -382,6 +852,10 @@ async def get_user_id(message: types.Message):
 @router.chat_member()
 async def handle_chat_member_event(event: ChatMemberUpdated):
     try:
+        try:
+            bot_manager.record_activity(event.bot.id)
+        except Exception:
+            pass
         # 获取事件相关信息
         chat_id = event.chat.id
         user = event.new_chat_member.user  # 获取变更状态的用户信息
@@ -401,7 +875,8 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
         # welcome_msg_url = "http://172.25.183.151:4070/admin/telegram/social/welcome_msg"
         # social_url = "http://172.25.183.151:4070/admin/telegram/social/socials"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        payload = {"verifyGroup": str(chat_id), "brand": "BYD", "type": "TELEGRAM"}
+        current_brand = bot_manager.get_brand_by_bot_id(event.bot.id, DEFAULT_BRAND)
+        payload = {"verifyGroup": str(chat_id), "brand": current_brand, "type": "TELEGRAM"}
 
         is_verification_group = False
         welcome_message = None
@@ -500,7 +975,7 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                 verified_user = await get_verified_user(user_id, chat_id)
                 if not verified_user:
                     logger.warning(f"未验证用户 {user_id} 试图加入资讯群 {chat_id}，踢出...")
-                    await bot.ban_chat_member(chat_id=chat_id, user_id=int(user_id))
+                    await event.bot.ban_chat_member(chat_id=chat_id, user_id=int(user_id))
                     # await bot.unban_chat_member(chat_id=chat_id, user_id=int(user_id))  # 可选解禁
                 else:
                     # 已验证用户
@@ -512,6 +987,10 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
 @router.message(Command("send_to_topic"))
 async def send_to_specific_topic(message: types.Message):
     """測試從本地文件夾發送圖片"""
+    try:
+        bot_manager.record_activity(message.bot.id)
+    except Exception:
+        pass
     command_parts = message.text.split()
     if len(command_parts) < 4:
         await message.reply("用法：/send_local_image <群組ID> <Topic ID> <圖片文件名> <文字內容>")
@@ -568,6 +1047,10 @@ async def handle_api_request(request, bot: Bot):
     允许传递 chat_id 参数来查询群组成员数量
     """
     try:
+        try:
+            bot_manager.record_activity(bot.id)
+        except Exception:
+            pass
         params = request.query
         chat_id = params.get("chat_id")
 
@@ -605,6 +1088,10 @@ async def handle_api_request(request, bot: Bot):
 
 async def handle_send_announcement(request: web.Request, *, bot: Bot):
     try:
+        try:
+            bot_manager.record_activity(bot.id)
+        except Exception:
+            pass
         data = await request.json()
         content = data.get("content")
         image_url = data.get("image")
@@ -687,6 +1174,8 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
                 
                 # 处理内容为HTML格式
                 processed_content = process_html_content(final_content)
+                # 為 RTL 語言自動加入方向控制字元（不影響可見文字）
+                processed_content = apply_rtl_if_needed(processed_content)
                 
                 logger.info(f"准备发送到频道 {chat_id}, topic {topic_id}, 语言 {lang_code}")
                 logger.info(f"内容长度: {len(processed_content)} 字符")
@@ -817,7 +1306,7 @@ async def handle_send_announcement(request: web.Request, *, bot: Bot):
         logger.error(f"詳細錯誤: {traceback.format_exc()}")
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-async def start_aiohttp_server(bot: Bot):
+async def start_aiohttp_server(bot: Bot, manager: BotManager):
     """启动 HTTP API 服务器"""
     app = web.Application()
     app.router.add_get("/api/get_member_count", lambda request: handle_api_request(request, bot))
@@ -828,6 +1317,94 @@ async def start_aiohttp_server(bot: Bot):
     app.router.add_post("/api/scalp_update", partial(handle_scalp_update, bot=bot))
     app.router.add_post("/api/report/holdings", partial(handle_holding_report, bot=bot))
     app.router.add_post("/api/report/weekly", partial(handle_weekly_report, bot=bot))
+
+    # 多 Bot 管理端點
+    async def _require_auth(request: web.Request):
+        auth = request.headers.get("Authorization", "")
+        if not BOT_REGISTER_API_KEY or not auth.startswith("Bearer ") or auth.split(" ", 1)[1] != BOT_REGISTER_API_KEY:
+            raise web.HTTPUnauthorized()
+
+    async def handle_register_bot(request: web.Request):
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"status": "error", "message": "Invalid JSON"}, status=400)
+
+        # 僅需 token 與 brand，brand 必須為 BYD
+        token = payload.get("token")
+        brand = (payload.get("brand") or DEFAULT_BRAND).strip()
+        if not token or not brand:
+            return web.json_response({"status": "error", "message": "Missing token or brand"}, status=400)
+        if brand != "BYD":
+            return web.json_response({"status": "error", "message": "Invalid brand."}, status=400)
+
+        try:
+            def _router_factory():
+                # 為動態 Bot 構建新的 Router，註冊相同的 handlers（避免重複附加已存在的 router 實例）
+                r = Router()
+                # group/private verify
+                r.message.register(handle_verify_command, Command("verify"))
+                r.message.register(handle_private_verify_command, Command("pverify"))
+                r.message.register(handle_verify_shortcut, Command("verify"))
+                # menu + start + free text
+                r.message.register(show_menu, Command("menu"))
+                r.message.register(handle_start, Command("start"))
+                r.message.register(handle_private_free_text)
+                # admin utils
+                r.message.register(unban_user, Command("unban"))
+                r.message.register(get_user_id, Command("getid"))
+                # chat member events
+                r.chat_member.register(handle_chat_member_event)
+                r.my_chat_member.register(handle_my_chat_member)
+                # callback handlers
+                r.callback_query.register(handle_inline_callbacks)
+                return r
+
+            result = await manager.register_and_start_bot(
+                token=token,
+                brand=brand,
+                proxy=None,
+                heartbeat_coro_factory=lambda b: heartbeat(b, interval=600),
+                # 動態代理 Bot 不啟動全域排程，只保留心跳與輪詢
+                periodic_coro_factory=None,
+                # 低頻保活：不自動停用（max_idle_seconds=None）
+                max_idle_seconds=None,
+                idle_check_interval=3600,
+                router_factory=_router_factory,
+            )
+            # 持久化這個代理 bot，方便重啟恢復
+            try:
+                _persist_agent(token, brand, None)
+            except Exception as e:
+                logger.error(f"persist agent failed: {e}")
+
+            return web.json_response({"status": "success", **result})
+        except Exception as e:
+            logger.error(f"register bot failed: {e}")
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+    async def handle_list_bots(request: web.Request):
+        await _require_auth(request)
+        return web.json_response({"status": "success", "bots": manager.list_bots()})
+
+    async def handle_stop_bot(request: web.Request):
+        await _require_auth(request)
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"status": "error", "message": "Invalid JSON"}, status=400)
+        bot_id = payload.get("bot_id")
+        if not bot_id:
+            return web.json_response({"status": "error", "message": "Missing bot_id"}, status=400)
+        try:
+            stopped = await manager.stop_bot(int(bot_id))
+            return web.json_response({"status": "success" if stopped else "not_found", "bot_id": bot_id})
+        except Exception as e:
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+    app.router.add_post("/api/bots/register", handle_register_bot)
+    app.router.add_get("/api/bots/list", handle_list_bots)
+    app.router.add_post("/api/bots/stop", handle_stop_bot)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -893,10 +1470,16 @@ async def main():
         cache_cleanup_task_instance = asyncio.create_task(cache_cleanup_task())
 
         logger.info("启动 HTTP API 服务器...")
-        http_server_runner, _ = await start_aiohttp_server(bot)
+        http_server_runner, _ = await start_aiohttp_server(bot, bot_manager)
 
         logger.info("启动 Telegram bot 轮询...")
         polling_task = asyncio.create_task(dp.start_polling(bot))
+
+        # 恢復上次已註冊的代理 bots
+        try:
+            await start_persisted_agents(bot_manager)
+        except Exception as e:
+            logger.error(f"restore persisted agents failed: {e}")
 
         logger.info("所有任务已启动，等待运行...")
         

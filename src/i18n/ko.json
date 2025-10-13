@@ -2,7 +2,7 @@
   "copy": {
     "open": {
       "body": "⚡️ {trader_name} 포지션 오픈\n\n📢{pair} {margin_type} {leverage}X\n⏰ 시간: {formatted_time} (UTC+0)\n➡️ 방향: {pair_side}\n🎯 진입 가격: ${entry_price}",
-      "more": "[About {trader_name}, more actions]({detail_url})"
+      "more": "[{trader_name} 정보, 더 많은 작업 >>]({detail_url})"
     }
   },
   "holding": {
@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} TP/SL 설정\n\n📢{pair} {pair_side}\n⏰ 시간: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} TP/SL 업뎃\n\n📢{pair} {pair_side}\n⏰ 시간: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} , ${tp_price}으로 변경:",
+      "tp_update_line": "✅ ${previous_tp_price} , ${tp_price}으로 변경",
       "tp_set_line": "✅ TP 가격: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} , ${sl_price}으로 병경경:",
+      "sl_update_line": "🛑 ${previous_sl_price} , ${sl_price}으로 병경경",
       "sl_set_line": "🛑 SL 가격: ${sl_price}"
     }
   },

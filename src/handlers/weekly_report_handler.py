@@ -263,12 +263,7 @@ async def process_weekly_report_list(data_list: list, bot: Bot) -> None:
         if DISCORD_BOT_WEEKLY:
             logger.info(f"[週報] 準備發送到 Discord Bot")
             try:
-                # 取語言：使用第一個目標語言或 API fallback
-                first_chat_id, _, _, first_group_lang = push_targets[0]
-                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
-                discord_lang = first_group_lang or first_api_lang or 'en'
                 payload = dict(data_list[0])
-                payload["lang"] = discord_lang
                 await send_discord_message(DISCORD_BOT_WEEKLY, payload)
                 logger.info(f"[週報] Discord Bot 發送成功")
             except Exception as e:
@@ -417,11 +412,7 @@ async def process_single_weekly_report(data: dict, bot: Bot) -> None:
         if DISCORD_BOT_WEEKLY:
             logger.info(f"[週報] 準備發送到 Discord Bot")
             try:
-                first_chat_id, _, _, first_group_lang = push_targets[0]
-                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
-                discord_lang = first_group_lang or first_api_lang or 'en'
                 payload = dict(data)
-                payload["lang"] = discord_lang
                 await send_discord_message(DISCORD_BOT_WEEKLY, payload)
                 logger.info(f"[週報] Discord Bot 發送成功")
             except Exception as e:

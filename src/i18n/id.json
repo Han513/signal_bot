@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} Pengaturan TP/SL\n\n📢{pair} {pair_side}\n⏰ Waktu: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} Update TP/SL\n\n📢{pair} {pair_side}\n⏰ Waktu: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} ubah menjadi  ${tp_price}:",
+      "tp_update_line": "✅ ${previous_tp_price} ubah menjadi  ${tp_price}",
       "tp_set_line": "✅ Harga TP: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} ubah menjadi ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} ubah menjadi ${sl_price}",
       "sl_set_line": "🛑 Harga SL: ${sl_price}"
     }
   },

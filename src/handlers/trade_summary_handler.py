@@ -311,15 +311,7 @@ async def process_trade_summary(data: dict, bot: Bot) -> None:
 
         # 同步發送至 Discord Bot
         if DISCORD_BOT_SUMMARY:
-            try:
-                first_chat_id, _, _, first_group_lang = push_targets[0]
-                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
-                discord_lang = first_group_lang or first_api_lang or 'en'
-            except Exception:
-                discord_lang = 'en'
-            payload = dict(data)
-            payload["lang"] = discord_lang
-            await send_discord_message(DISCORD_BOT_SUMMARY, payload)
+            await send_discord_message(DISCORD_BOT_SUMMARY, dict(data))
 
     except Exception as e:
         logger.error(f"推送交易總結失敗: {e}")

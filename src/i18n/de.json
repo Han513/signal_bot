@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} KA/ZD-Einstellung\n\n📢{pair} {pair_side}\n⏰ Zeit: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} KA/ZD-Aktualisierung\n\n📢{pair} {pair_side}\n⏰ Zeit: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} geändert zu ${tp_price}:",
+      "tp_update_line": "✅ ${previous_tp_price} geändert zu ${tp_price}",
       "tp_set_line": "✅ KA-Preis: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} geändert zu ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} geändert zu ${sl_price}",
       "sl_set_line": "🛑 ZD-Preis: ${sl_price}"
     }
   },

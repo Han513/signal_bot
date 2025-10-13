@@ -7,7 +7,7 @@ import urllib.parse
 from aiogram import Bot
 from aiogram.types import FSInputFile
 from dotenv import load_dotenv
-from multilingual_utils import get_multilingual_content
+from multilingual_utils import get_multilingual_content, apply_rtl_if_needed
 
 load_dotenv()
 
@@ -155,6 +155,7 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
                 
             try:
                 content = get_multilingual_content(post, lang)
+                content = apply_rtl_if_needed(content)
                 
                 if image and image_file:
                     await bot.send_photo(

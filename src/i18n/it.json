@@ -1,8 +1,8 @@
 {
   "copy": {
     "open": {
-      "body": "⚡️ Nuova Operazione Aperta da {trader_name}    📢 {pair} USDT {margin_type} {leverage}X\n\n📢{pair} {margin_type} {leverage}X\n⏰ Orario: {formatted_time} (UTC+0)\n➡️ Direzione: {pair_side}\n🎯 Prezzo di Ingresso: ${entry_price}",
-      "more": "[🎯 Prezzo di Ingresso:                                    Informazioni su {trader_name}, altre azioni]({detail_url})"
+      "body": "⚡️ Nuova Operazione Aperta da {trader_name}\n\n📢{pair} {margin_type} {leverage}X\n⏰ Orario: {formatted_time} (UTC+0)\n➡️ Direzione: {pair_side}\n🎯 Prezzo di Ingresso: ${entry_price}",
+      "more": "[Informazioni su {trader_name}, altre azioni >>]({detail_url})"
     }
   },
   "holding": {
@@ -16,22 +16,22 @@
   },
   "trade": {
     "close": {
-      "body": "⚡️ {trader_name} Chiude la Posizione\n\n📢{pair} {margin_type} {leverage}X\n {formatted_time} (UTC+0)\n➡️ Direzione: {pair_side}\n🙌🏻 ROI: {realized_pnl}%\n🎯 Prezzo di Ingresso: ${entry_price}\n💰 Prezzo di Uscita: ${exit_price}"
+      "body": "⚡️ {trader_name} Chiude la Posizione\n\n📢{pair} {margin_type} {leverage}X\n⏰ Orario: {formatted_time} (UTC+0)\n➡️ Direzione: {pair_side}\n🙌🏻 ROI: {realized_pnl}%\n🎯 Prezzo di Ingresso: ${entry_price}\n💰 Prezzo di Uscita: ${exit_price}"
     }
   },
   "scalp": {
     "tp_sl": {
-      "body": "⚡️ {trader_name} Impostazione TP/SL                    📢 {pair} USDT {pair_side}\n\n📢{pair} {pair_side}\n⏰ Orario: {formatted_time} (UTC+0)",
-      "update_header": "⚡️ {trader_name} Aggiornamento TP/SL                   📢 {pair} USDT {pair_side}\n\n📢{pair} {pair_side}\n⏰ Orario: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} modificato in ${tp_price}         🛑 Prezzo SL: {price} modificato in {price} Informazioni su {trader_name}, altre azioni >>:",
+      "body": "⚡️ {trader_name} Impostazione TP/SL\n\n📢{pair} {pair_side}\n⏰ Orario: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} Aggiornamento TP/SL\n\n📢{pair} {pair_side}\n⏰ Orario: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} modificato in ${tp_price}",
       "tp_set_line": "✅ Prezzo TP: ${tp_price}",
-      "sl_update_line": "🛑 ",
+      "sl_update_line": "🛑 ${previous_sl_price} modificato in ${sl_price}",
       "sl_set_line": "🛑 Prezzo SL: ${sl_price}"
     }
   },
   "weekly": {
     "report": {
-      "header": "⚡️ {trader_name} Report Settimanale dei Risultati  🔥 ROI:",
+      "header": "⚡️ {trader_name} Report Settimanale dei Risultati",
       "body": "⚡️ {trader_name} Report Settimanale dei Risultati  🔥 ROI:\n\n {total_roi}%\n\n📈 Totale Operazioni: {total_trades}\n✅ Vincite: {win_trades}\n❌ Perdite: {loss_trades}\n🏆 Percentuale di Successo: {win_rate}%"
     },
     "rank": {

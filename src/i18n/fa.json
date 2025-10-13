@@ -1,13 +1,13 @@
 {
   "copy": {
     "open": {
-      "body": "⚡️ {trader_name} معامله جدید باز شد\n\n📢{pair} {margin_type} {leverage}X\n⏰ زمان: {formatted_time} (UTC+0)\n➡️ جهت: {pair_side}\n🎯 قیمت ورود: ${entry_price}",
+      "body": "⚡️ {trader_name} معامله جدید باز شد\n\n📢 {pair} {margin_type} {leverage}X\n⏰ زمان: {formatted_time} (UTC+0)\n➡️ جهت: {pair_side}\n🎯 قیمت ورود: ${entry_price}",
       "more": "[درباره {trader_name}، اقدامات بیشتر]({detail_url})"
     }
   },
   "holding": {
     "summary": {
-      "body": "⚡️ {trader_name} خلاصه معاملات (بروزرسانی هر ۱۲ ساعت)\n\n📢{pair} {margin_type} {leverage}X\n➡️ جهت: {pair_side}\n🎯 قیمت ورود: ${entry_price}\n📊 قیمت فعلی: ${current_price}\n🚀 سود/زیان {roi}%",
+      "body": "⚡️ {trader_name} خلاصه معاملات (بروزرسانی هر ۱۲ ساعت)\n\n📢 {pair} {margin_type} {leverage}X\n➡️ جهت: {pair_side}\n🎯 قیمت ورود: ${entry_price}\n📊 قیمت فعلی: ${current_price}\n🚀 سود/زیان {roi}%",
       "header": "⚡️ {trader_name} خلاصه معاملات (بروزرسانی هر ۱۲ ساعت)",
       "item": "**{index}. {pair} {margin_type} {leverage}X**\n➡️ جهت: {pair_side}\n🎯 قیمت ورود: ${entry_price}\n📊 قیمت فعلی: ${current_price}\n🚀 سود/زیان {roi}%",
       "tp_line": "✅ حد سود: ${tp_price}",
@@ -16,23 +16,23 @@
   },
   "trade": {
     "close": {
-      "body": "⚡️ {trader_name} بستن معامله\n\n📢{pair} {margin_type} {leverage}X\n⏰ زمان: {formatted_time} (UTC+0)\n➡️ جهت: {pair_side}\n🙌🏻 سود/زیان {realized_pnl}%\n🎯 قیمت ورود: ${entry_price}\n💰 قیمت خروج: ${exit_price}"
+      "body": "⚡️ {trader_name} بستن معامله\n\n📢 {pair} {margin_type} {leverage}X\n⏰ زمان: {formatted_time} (UTC+0)\n➡️ جهت: {pair_side}\n🙌🏻 سود/زیان {realized_pnl}%\n🎯 قیمت ورود: ${entry_price}\n💰 قیمت خروج: ${exit_price}"
     }
   },
   "scalp": {
     "tp_sl": {
-      "body": "⚡️ {trader_name} تنظیم حد سود/ضرر\n\n📢{pair} {pair_side}\n⏰ زمان: {formatted_time} (UTC+0)",
-      "update_header": "⚡️ {trader_name} بروزرسانی حد سود/ضرر\n\n📢{pair} {pair_side}\n⏰ زمان: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} تغییر به ${tp_price}:",
+      "body": "⚡️ {trader_name} تنظیم حد سود/ضرر\n\n📢 {pair} {pair_side}\n⏰ زمان: {formatted_time} (UTC+0)",
+      "update_header": "⚡️ {trader_name} بروزرسانی حد سود/ضرر\n\n📢 {pair} {pair_side}\n⏰ زمان: {formatted_time} (UTC+0)",
+      "tp_update_line": "✅ ${previous_tp_price} تغییر به ${tp_price}",
       "tp_set_line": "✅ حد سود: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} تغییر به ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} تغییر به ${sl_price}",
       "sl_set_line": "🛑 حد ضرر: ${sl_price}"
     }
   },
   "weekly": {
     "report": {
-      "header": "⚡️ {trader_name} گزارش عملکرد هفتگی",
-      "body": "⚡️ {trader_name} گزارش عملکرد هفتگی\n\n🔥 سود/زیان: {total_roi}%\n\n📈 کل معاملات: {total_trades}\n✅ بردها: {win_trades}\n❌ باخت‌ها: {loss_trades}\n🏆 درصد برد: {win_rate}%"
+      "header": "{trader_name} گزارش عملکرد هفتگی ⚡️",
+      "body": "{trader_name} گزارش عملکرد هفتگی ⚡️\n\n🔥 سود/زیان: {total_roi}%\n\n📈 کل معاملات: {total_trades}\n✅ بردها: {win_trades}\n❌ باخت‌ها: {loss_trades}\n🏆 درصد برد: {win_rate}%"
     },
     "rank": {
       "item": "**{rank}. {trader_name}**\n🔥 سود/زیان: {total_roi}%\n📈 کل معاملات: {total_trades}\n✅ بردها: {win_trades}\n❌ باخت‌ها: {loss_trades}\n🏆 درصد برد: {win_rate}%\n"

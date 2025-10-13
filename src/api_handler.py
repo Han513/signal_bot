@@ -33,7 +33,9 @@ async def periodic_api_check(api_url, bot, target_group_id, interval=30):
         if pending_messages:  # 如果有待處理消息
             for message in pending_messages:
                 try:
-                    await bot.send_message(chat_id=target_group_id, text=message)
+                    # 不改變可見文案內容，僅在需要時加入 RTL 控制
+                    from multilingual_utils import apply_rtl_if_needed
+                    await bot.send_message(chat_id=target_group_id, text=apply_rtl_if_needed(message))
                     logger.info(f"成功發送消息到群組 {target_group_id}: {message}")
                 except Exception as e:
                     logger.error(f"無法發送消息到群組 {target_group_id}: {e}")

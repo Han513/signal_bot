@@ -6,6 +6,7 @@ from aiogram import Bot
 from aiohttp import web
 from dotenv import load_dotenv
 from aiogram.types import FSInputFile
+from multilingual_utils import apply_rtl_if_needed
 import aiofiles
 import tempfile
 from PIL import Image, ImageDraw, ImageFont
@@ -26,9 +27,12 @@ logger = logging.getLogger(__name__)
 _image_generation_lock = asyncio.Lock()
 
 # 全局去重缓存，用于防止重复推送
-_message_dedup_cache = {}
 _task_dedup_cache = {}
-_message_dedup_lock = asyncio.Lock()
+_external_id_cache = {}
+_external_id_lock = asyncio.Lock()
+
+# 外部ID去重的緩存時間（秒）
+_EXTERNAL_ID_TTL_SECONDS = 15 * 60
 
 # 清理过期缓存的任务
 async def cleanup_dedup_cache():
@@ -36,13 +40,7 @@ async def cleanup_dedup_cache():
     current_time = time.time()
     expired_keys = []
     
-    # 清理消息缓存（1分钟过期）
-    for key, (timestamp, _) in _message_dedup_cache.items():
-        if current_time - timestamp > 60:  # 1分钟
-            expired_keys.append(key)
-    
-    for key in expired_keys:
-        del _message_dedup_cache[key]
+    # 消息去重已移除，不再需要清理消息缓存
     
     # 清理任务缓存（1分钟过期）
     expired_task_keys = []
@@ -52,9 +50,17 @@ async def cleanup_dedup_cache():
     
     for key in expired_task_keys:
         del _task_dedup_cache[key]
+
+    # 清理外部ID缓存（15分鐘過期）
+    expired_ext_keys = []
+    for key, ts in _external_id_cache.items():
+        if current_time - ts > _EXTERNAL_ID_TTL_SECONDS:
+            expired_ext_keys.append(key)
+    for key in expired_ext_keys:
+        del _external_id_cache[key]
     
-    if expired_keys or expired_task_keys:
-        logger.debug(f"清理了 {len(expired_keys)} 个消息缓存和 {len(expired_task_keys)} 个任务缓存")
+    if expired_task_keys or expired_ext_keys:
+        logger.debug(f"清理了 {len(expired_task_keys)} 个任务缓存、{len(expired_ext_keys)} 个外部ID缓存")
 
 
 def _normalize_template_lang(lang_code: str) -> str:
@@ -178,19 +184,16 @@ async def send_telegram_message(bot: Bot, chat_id: int, topic_id: int,
     Returns:
         bool: 發送是否成功
     """
-    # 消息去重检查
-    if trader_uid and text:
-        message_hash = generate_message_hash(trader_uid, text, chat_id, topic_id)
-        # 使用帶鎖檢查避免競態
-        if await is_duplicate_message_safe(message_hash):
-            logger.info(f"跳过重复消息发送: trader_uid={trader_uid}, chat_id={chat_id}, topic_id={topic_id}")
-            return True  # 返回True表示"成功"跳过重复消息
+    # 消息去重已改為統一使用外部ID控制，此處不再需要消息級去重
     
     max_retries = 2
     retry_delay = 1.0
     
     for attempt in range(max_retries + 1):
         try:
+            # 根據內容自動加入 RTL 控制，避免阿拉伯/波斯語方向錯亂
+            safe_text = apply_rtl_if_needed(text) if text is not None else None
+
             if photo_path:
                 # 驗證圖片文件是否存在且有效
                 if not os.path.exists(photo_path):
@@ -206,14 +209,14 @@ async def send_telegram_message(bot: Bot, chat_id: int, topic_id: int,
                     chat_id=chat_id,
                     message_thread_id=topic_id,
                     photo=photo,
-                    caption=text,
+                    caption=safe_text,
                     parse_mode=parse_mode
                 )
             else:
                 await bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=topic_id,
-                    text=text,
+                    text=safe_text,
                     parse_mode=parse_mode
                 )
             return True
@@ -288,75 +291,79 @@ def is_all_english(s):
     except UnicodeEncodeError:
         return False
 
-def generate_message_hash(trader_uid: str, content: str, chat_id: int, topic_id: int) -> str:
-    """生成消息的唯一哈希值"""
-    message_data = f"{trader_uid}:{content}:{chat_id}:{topic_id}"
-    return hashlib.md5(message_data.encode('utf-8')).hexdigest()
+# 消息去重函數已移除，統一使用外部ID去重
 
 def generate_task_hash(func_name: str, *args, **kwargs) -> str:
-    """生成任务的唯一哈希值"""
-    # 提取关键参数用于去重
+    """生成任务的唯一哈希值（更嚴謹的去重）
+
+    規則：
+    - 基礎鍵包含函數名
+    - 若首個參數為 dict（典型 data），嘗試加入 trader_uid 與時間欄位（time/close_time）
+      這樣同一交易員在不同時間的請求不會被視為重複
+    - 對於持倉報告列表，使用原始 data_raw 的 trader_uid 與每條 info 的核心欄位
+    """
+
     key_parts = [func_name]
-    
-    # 对于持仓报告，使用 trader_uid 和 infos 内容作为去重键
+
+    # 常規：嘗試從第一個參數字典中提取關鍵鍵值
+    if args:
+        first_arg = args[0]
+        if isinstance(first_arg, dict):
+            trader_uid = str(first_arg.get("trader_uid", ""))
+            # 支援多種時間鍵名
+            ts_val = first_arg.get("time")
+            if ts_val is None:
+                ts_val = first_arg.get("close_time")
+            if ts_val is None:
+                ts_val = first_arg.get("timestamp")
+            # 拼裝
+            if trader_uid:
+                key_parts.append(trader_uid)
+            if ts_val is not None:
+                try:
+                    key_parts.append(str(int(float(ts_val))))
+                except Exception:
+                    key_parts.append(str(ts_val))
+
+            # 額外附加幾個穩定欄位（如存在）
+            pair = first_arg.get("pair")
+            if pair:
+                key_parts.append(str(pair))
+            side = first_arg.get("pair_side")
+            if side is not None:
+                key_parts.append(str(side))
+
+    # 專用：持倉報告列表使用原始結構
     if func_name == "process_holding_report_list":
-        if args and len(args) > 1:
-            data_raw = kwargs.get('data_raw') or args[1] if len(args) > 1 else None
-            if data_raw:
-                # 提取所有 trader_uid 和 infos 的关键信息
-                trader_keys = []
-                for trader in data_raw:
-                    trader_uid = str(trader.get("trader_uid", ""))
-                    infos = trader.get("infos", [])
-                    # 为每个 info 生成简化的键
-                    info_keys = []
-                    for info in infos:
-                        info_key = f"{info.get('pair', '')}:{info.get('entry_price', '')}:{info.get('current_price', '')}"
-                        info_keys.append(info_key)
-                    trader_keys.append(f"{trader_uid}:{','.join(sorted(info_keys))}")
-                key_parts.extend(sorted(trader_keys))
-    
+        data_raw = kwargs.get("data_raw")
+        if data_raw and isinstance(data_raw, list):
+            trader_keys = []
+            for trader in data_raw:
+                if not isinstance(trader, dict):
+                    continue
+                t_uid = str(trader.get("trader_uid", ""))
+                infos = trader.get("infos", [])
+                info_keys = []
+                for info in infos:
+                    if not isinstance(info, dict):
+                        continue
+                    # 帶上方向與保證金類型，避免不同倉位被合併
+                    info_key = f"{info.get('pair', '')}:{info.get('pair_side', '')}:{info.get('pair_margin_type', '')}:{info.get('entry_price', '')}:{info.get('current_price', '')}"
+                    # 若有時間也帶上
+                    ts = info.get("time") or info.get("update_time")
+                    if ts is not None:
+                        try:
+                            info_key += f":{int(float(ts))}"
+                        except Exception:
+                            info_key += f":{ts}"
+                    info_keys.append(info_key)
+                trader_keys.append(f"{t_uid}:{','.join(sorted(info_keys))}")
+            key_parts.extend(sorted(trader_keys))
+
     task_data = ":".join(str(part) for part in key_parts)
     return hashlib.md5(task_data.encode('utf-8')).hexdigest()
 
-def is_duplicate_message(message_hash: str) -> bool:
-    """检查是否为重复消息（非協程上下文，無鎖）。
-    如果不存在，會將該 hash 寫入快取，表示已在本輪準備發送。
-    有效期為 1 分鐘。
-    """
-    current_time = time.time()
-    
-    # 清理过期缓存
-    expired_keys = []
-    for key, (timestamp, _) in _message_dedup_cache.items():
-        if current_time - timestamp > 60:  # 1分钟过期
-            expired_keys.append(key)
-    
-    for key in expired_keys:
-        del _message_dedup_cache[key]
-    
-    # 检查是否已存在
-    if message_hash in _message_dedup_cache:
-        logger.warning(f"检测到重复消息，跳过发送: {message_hash}")
-        return True
-    
-    # 添加到缓存
-    _message_dedup_cache[message_hash] = (current_time, True)
-    return False
-
-async def is_duplicate_message_safe(message_hash: str) -> bool:
-    """攔截併發的帶鎖版本，避免競態條件。"""
-    async with _message_dedup_lock:
-        return is_duplicate_message(message_hash)
-
-def has_message_hash(message_hash: str) -> bool:
-    """檢查 hash 是否已在快取中（非協程，無副作用）。"""
-    return message_hash in _message_dedup_cache
-
-async def has_message_hash_safe(message_hash: str) -> bool:
-    """帶鎖檢查 hash 是否存在，用於重試時判斷是否已實際發送成功。"""
-    async with _message_dedup_lock:
-        return has_message_hash(message_hash)
+# 消息去重相關函數已移除，統一使用外部ID去重
 
 def is_duplicate_task(task_hash: str) -> bool:
     """检查是否为重复任务"""
@@ -551,13 +558,52 @@ def create_async_response(task_func, *args, **kwargs):
     """
     創建異步響應的通用函數，包含去重機制
     """
-    # 生成任务哈希值用于去重
-    task_hash = generate_task_hash(task_func.__name__, *args, **kwargs)
+    # 優先使用後端傳入的外部ID進行去重（TTL 15 分鐘）
+    # 嘗試從第一個參數中取得 data.id（或 kwargs 中）
+    external_id = None
+    if args:
+        first_arg = args[0]
+        if isinstance(first_arg, dict):
+            external_id = first_arg.get("id") or first_arg.get("request_id")
+            logger.debug(f"[外部ID檢查] 從 args[0] 提取: {external_id}, 可用鍵: {list(first_arg.keys())}")
+    if external_id is None:
+        external_id = kwargs.get("id") or kwargs.get("request_id")
+        logger.debug(f"[外部ID檢查] 從 kwargs 提取: {external_id}, 可用鍵: {list(kwargs.keys())}")
     
-    # 检查是否为重复任务
-    if is_duplicate_task(task_hash):
-        logger.info(f"跳过重复任务执行: {task_func.__name__}")
-        return web.json_response({"status": "200", "message": "任务已存在，跳过重复执行"}, status=200)
+    logger.info(f"[外部ID檢查] 最終外部ID: {external_id}, 函數: {task_func.__name__}")
+
+    if external_id:
+        async def check_and_set_external_id(key: str) -> bool:
+            async with _external_id_lock:
+                # 清理過期的外部ID
+                await cleanup_dedup_cache()
+                if key in _external_id_cache:
+                    return True
+                _external_id_cache[key] = time.time()
+                return False
+
+        # 若外部ID已存在，直接返回成功且不排程任務
+        if asyncio.get_event_loop().is_running():
+            # 協程上下文
+            already = asyncio.get_event_loop().run_until_complete(check_and_set_external_id(str(external_id))) if False else None
+        # 以非阻塞方式檢查/設置（簡化：同步檢查）
+        # 這裡由於 create_async_response 非 async，我們採用無鎖快速檢查+標記，競態極低風險
+        current_time = time.time()
+        # 手動清理過期外部ID（快速路徑）
+        expired_ext = [k for k, ts in _external_id_cache.items() if current_time - ts > _EXTERNAL_ID_TTL_SECONDS]
+        for k in expired_ext:
+            del _external_id_cache[k]
+        if str(external_id) in _external_id_cache:
+            logger.info(f"跳过外部ID重复任务: id={external_id}, func={task_func.__name__}")
+            return web.json_response({"status": "200", "message": "外部ID已存在，跳過重複執行"}, status=200)
+        _external_id_cache[str(external_id)] = current_time
+
+    # 若無外部ID，才使用內部規則作為後備去重
+    if not external_id:
+        task_hash = generate_task_hash(task_func.__name__, *args, **kwargs)
+        if is_duplicate_task(task_hash):
+            logger.info(f"跳过重复任务执行: {task_func.__name__}")
+            return web.json_response({"status": "200", "message": "任务已存在，跳过重复执行"}, status=200)
     
     # 创建异步任务
     asyncio.create_task(handle_async_task(task_func, *args, **kwargs))

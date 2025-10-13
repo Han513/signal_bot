@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} การตั้งค่า TP/SL\n\n📢{pair} {pair_side}\n⏰ เวลา: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} อัปเดต TP/SL\n\n📢{pair} {pair_side}\n⏰ เวลา: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} เปลี่ยนเป็น ${tp_price}:",
+      "tp_update_line": "✅ ${previous_tp_price} เปลี่ยนเป็น ${tp_price}",
       "tp_set_line": "✅ ราคา TP: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} เปลี่ยนเป็น ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} เปลี่ยนเป็น ${sl_price}",
       "sl_set_line": "🛑 ราคา SL: ${sl_price}"
     }
   },

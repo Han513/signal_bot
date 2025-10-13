@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} Configuração TP/SL\n\n📢{pair} {pair_side}\n⏰ Horário: {formatted_time} (UTC+0)",
       "update_header": "⚡️ Atualização TP/SL de {trader_name}\n\n📢{pair} {pair_side}\n⏰ Horário: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} alterado para ${tp_price}:",
+      "tp_update_line": "✅ ${previous_tp_price} alterado para ${tp_price}",
       "tp_set_line": "✅ Preço TP: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} alterado para ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} alterado para ${sl_price}",
       "sl_set_line": "🛑 Preço SL: ${sl_price}"
     }
   },

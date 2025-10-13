@@ -295,18 +295,11 @@ async def process_holding_report_list(data_list: list, bot: Bot, data_raw=None) 
             batch_size = 10
             total = len(data_raw)
             logger.info(f"[持倉報告] 準備分批推送到 Discord Bot, 批次大小: {batch_size}, 總數: {total}")
-            # 決定 Discord 使用的語言：取第一個推送目標語言，或 API fallback
-            try:
-                first_chat_id, _, _, first_group_lang = push_targets[0]
-                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
-                discord_lang = first_group_lang or first_api_lang or 'en'
-            except Exception:
-                discord_lang = 'en'
             for i in range(0, total, batch_size):
                 batch = data_raw[i:i+batch_size]
                 logger.info(f"[持倉報告] 即將發送到 Discord Bot, 批次 {i//batch_size+1}: {len(batch)} 個 trader")
                 try:
-                    payload = {"data": batch, "lang": discord_lang}
+                    payload = {"data": batch}
                     await send_discord_message(DISCORD_BOT_HOLDING, payload)
                     logger.info(f"[持倉報告] Discord 批次 {i//batch_size+1} 發送完成")
                 except Exception as e:
@@ -404,16 +397,7 @@ async def process_single_holding_report(data: dict, bot: Bot) -> None:
         # 同步發送至 Discord Bot
         if DISCORD_BOT_HOLDING:
             logger.info(f"[持倉報告] 即將發送到 Discord Bot: {data}")
-            try:
-                # 取語言：使用第一個目標語言或 API fallback
-                first_chat_id, _, _, first_group_lang = push_targets[0]
-                first_api_lang = await get_preferred_language(user_id=None, chat_id=str(first_chat_id))
-                discord_lang = first_group_lang or first_api_lang or 'en'
-            except Exception:
-                discord_lang = 'en'
-            payload = dict(data)
-            payload["lang"] = discord_lang
-            await send_discord_message(DISCORD_BOT_HOLDING, payload)
+            await send_discord_message(DISCORD_BOT_HOLDING, dict(data))
 
     except Exception as e:
         logger.error(f"推送單個持倉報告失敗: {e}")

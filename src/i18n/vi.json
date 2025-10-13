@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} Cài Đặt TP/SL\n\n📢{pair} {pair_side}\n⏰ Thời Gian: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} Cập Nhật TP/SL\n\n📢{pair} {pair_side}\n⏰ Thời Gian: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} đổi thành ${tp_price}:",
+      "tp_update_line": "✅ ${previous_tp_price} đổi thành ${tp_price}",
       "tp_set_line": "✅ Giá TP: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} đổi thành ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} đổi thành ${sl_price}",
       "sl_set_line": "🛑 Giá SL: ${sl_price}"
     }
   },

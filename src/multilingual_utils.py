@@ -48,6 +48,7 @@ import os
 import json
 import time
 import logging
+import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,13 @@ _LANGUAGE_API_URL = os.getenv('LANGUAGE_API_URL', '')
 
 # 模板快取
 _templates_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def clear_templates_cache():
+    """清除模板快取，強制重新載入所有模板"""
+    global _templates_cache
+    _templates_cache.clear()
+    logger.info("模板快取已清除，下次載入將重新讀取檔案")
 
 
 def _now() -> float:
@@ -235,6 +243,50 @@ def escape_markdown_v2(text):
     # 確保換行符不被轉義，保持原始換行
     # 在 MarkdownV2 中，換行符需要保持原樣
     return text
+
+
+def _contains_arabic(text: str) -> bool:
+    """檢測字串是否包含阿拉伯/波斯文字符。
+
+    包含的 Unicode 區段：
+    - Arabic: U+0600–U+06FF
+    - Arabic Supplement: U+0750–U+077F
+    - Arabic Extended-A/B: U+08A0–U+08FF
+    - Arabic Presentation Forms A/B: U+FB50–U+FDFF, U+FE70–U+FEFF
+    """
+    if not text:
+        return False
+    return bool(re.search(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]", text))
+
+
+def apply_rtl_if_needed(text: Optional[str]) -> Optional[str]:
+    """若文字包含阿拉伯/波斯文，為每一行加上 RTL 控制符，避免 Telegram LTR 誤判。
+
+    - 不改變可見內容（僅加入不可見方向控制字元）。
+    - 使用 RLI (U+2067) 與 PDI (U+2069) 進行隔離，穩定行內混合英數的呈現。
+    - 若行已以 RLI/RLM/RLE 開頭則不重複添加。
+    """
+    if text is None or text == "":
+        return text
+
+    if not _contains_arabic(text):
+        return text
+
+    RLI = "\u2067"  # Right-to-Left Isolate
+    PDI = "\u2069"  # Pop Directional Isolate
+    RLM = "\u200F"  # Right-to-Left Mark（普遍支援，影響段落方向）
+    RLE = "\u202B"  # Right-to-Left Embedding
+
+    def wrap_line(line: str) -> str:
+        if not line.strip():
+            return line
+        if line and line[0] in (RLI, RLM, RLE):
+            return line
+        # 以 RLM 置頂，確保 Telegram 以 RTL 段落處理；
+        # 同時用 RLI/PDI 隔離整行，避免行內英數影響排序
+        return f"{RLM}{RLI}{line}{PDI}"
+
+    return "\n".join(wrap_line(l) for l in text.splitlines())
 
 
 def _normalize_template_lang_code(lang: str) -> str:

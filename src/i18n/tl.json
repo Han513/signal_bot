@@ -23,9 +23,9 @@
     "tp_sl": {
       "body": "⚡️ {trader_name} TP/SL Setting\n\n📢{pair} {pair_side}\n⏰ Oras: {formatted_time} (UTC+0)",
       "update_header": "⚡️ {trader_name} TP/SL Update\n\n📢{pair} {pair_side}\n⏰ Oras: {formatted_time} (UTC+0)",
-      "tp_update_line": "✅ ${previous_tp_price} naging ${tp_price}:",
+      "tp_update_line": "✅ ${previous_tp_price} naging ${tp_price}",
       "tp_set_line": "✅ Presyo ng TP: ${tp_price}",
-      "sl_update_line": "🛑 ${previous_sl_price} naging ${sl_price}:",
+      "sl_update_line": "🛑 ${previous_sl_price} naging ${sl_price}",
       "sl_set_line": "🛑 Presyo ng SL: ${sl_price}"
     }
   },
