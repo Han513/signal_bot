@@ -1,6 +1,6 @@
 import os
 import logging
-from sqlalchemy import Column, Integer, String, DateTime, select, Boolean, delete, update
+from sqlalchemy import Column, Integer, String, DateTime, select, Boolean, delete, update, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from datetime import datetime, timezone, timedelta
@@ -187,29 +187,98 @@ async def add_verified_user(user_id: str, verify_group_id: str, info_group_id: s
             raise
 
 async def is_user_verified(user_id: str, verify_group_id: str, verify_code: str) -> str:
+    """检查用户是否已验证，带重试机制处理数据库连接问题"""
+    max_retries = 3
+    retry_delay = 1  # 秒
+    
+    for attempt in range(max_retries):
+        try:
+            async with Session() as session:
+                # 首先检查全局UID重复（跨所有群组）- 使用 scalars().all() 避免 Multiple rows 错误
+                global_uid_stmt = select(VerifyUser).where(
+                    VerifyUser.verify_code == verify_code,
+                    VerifyUser.is_active == True
+                )
+                global_result = await session.execute(global_uid_stmt)
+                global_records = global_result.scalars().all()
 
+                if global_records:
+                    # 检查是否有其他用户使用了这个UID
+                    for record in global_records:
+                        if record.user_id != user_id:
+                            logging.warning(f"UID {verify_code} already used by user {record.user_id}, current user: {user_id}")
+                            return "warning"
+                    
+                    # 如果所有记录都是当前用户的，返回已验证
+                    return "verified"
+                
+                # 如果没有全局重复，检查特定群组的验证状态（如果提供了verify_group_id）
+                if verify_group_id and verify_group_id.strip():
+                    group_stmt = select(VerifyUser).where(
+                        VerifyUser.verify_group_id == verify_group_id,
+                        VerifyUser.verify_code == verify_code,
+                        VerifyUser.is_active == True
+                    )
+                    group_result = await session.execute(group_stmt)
+                    group_records = group_result.scalars().all()
+
+                    if group_records:
+                        # 检查是否有其他用户使用了这个UID
+                        for record in group_records:
+                            if record.user_id != user_id:
+                                return "warning"
+                
+                # 如果没有匹配的记录，返回未验证
+                return "not_verified"
+                
+        except Exception as e:
+            logging.error(f"检查用户是否已验证时发生错误 (尝试 {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                logging.info(f"等待 {retry_delay} 秒后重试...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # 指数退避
+            else:
+                logging.error(f"所有重试尝试都失败了，返回错误状态")
+                return "error"
+        
+async def cleanup_duplicate_verify_codes():
+    """清理重复的验证码记录，保留最新的记录"""
     async with Session() as session:
         try:
-            # 查询是否存在与 verify_code 和 verify_group_id 匹配的记录
-            stmt = select(VerifyUser).where(
-                VerifyUser.verify_group_id == verify_group_id,
-                VerifyUser.verify_code == verify_code,
-                VerifyUser.is_active == True
-            )
-            result = await session.execute(stmt)
-            record = result.scalar_one_or_none()
-
-            if record:
-                # 如果 UID 已存在但 user_id 不同，返回警告
-                if record.user_id != user_id:
-                    return "warning"
-            
-            # 如果没有匹配的记录，返回未验证
-            return "not_verified"
+            async with session.begin():
+                # 查找重复的verify_code
+                duplicate_stmt = (
+                    select(VerifyUser.verify_code)
+                    .group_by(VerifyUser.verify_code)
+                    .having(func.count(VerifyUser.verify_code) > 1)
+                )
+                duplicate_result = await session.execute(duplicate_stmt)
+                duplicate_codes = duplicate_result.scalars().all()
+                
+                cleaned_count = 0
+                for verify_code in duplicate_codes:
+                    # 对每个重复的verify_code，保留最新的记录，删除其他记录
+                    stmt = (
+                        select(VerifyUser)
+                        .where(VerifyUser.verify_code == verify_code)
+                        .order_by(VerifyUser.verified_at.desc())
+                    )
+                    result = await session.execute(stmt)
+                    records = result.scalars().all()
+                    
+                    # 保留第一条（最新的），删除其他
+                    if len(records) > 1:
+                        for record in records[1:]:
+                            await session.delete(record)
+                            cleaned_count += 1
+                
+                if cleaned_count > 0:
+                    logging.info(f"清理了 {cleaned_count} 条重复的验证码记录")
+                return cleaned_count
         except Exception as e:
-            logging.error(f"检查用户是否已验证时发生错误: {e}")
-            return "not_verified"
-        
+            logging.error(f"清理重复验证码记录时发生错误: {e}")
+            return 0
+
 async def get_verified_user(user_id: str, info_group_id: str) -> bool:
     """
     检查用户是否已验证，并确认用户的 info_group_id 是否与当前群组 ID 匹配。

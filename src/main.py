@@ -55,6 +55,11 @@ DISCORD_BOT = os.getenv("DISCORD_BOT")
 BOT_REGISTER_API_KEY = os.getenv("BOT_REGISTER_API_KEY")
 DEFAULT_BRAND = os.getenv("DEFAULT_BRAND", "BYD")
 
+# 新的私聊专用接口
+WELCOME_API_BY_BOT = os.getenv("WELCOME_API_BY_BOT")
+VERIFY_API_BY_BOT = os.getenv("VERIFY_API_BY_BOT")
+DETAIL_API_BY_BOT = os.getenv("DETAIL_API_BY_BOT")
+
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -114,7 +119,7 @@ def _save_agents_store(items: list) -> None:
     except Exception as e:
         logger.error(f"save agents store failed: {e}")
 
-def _persist_agent(token: str, brand: str, proxy: Optional[str]) -> None:
+def _persist_agent(token: str, brand: str, proxy: Optional[str], bot_name: Optional[str] = None, bot_username: Optional[str] = None) -> None:
     items = _load_agents_store()
     # 去重（以 token 為鍵）
     exists = False
@@ -123,15 +128,24 @@ def _persist_agent(token: str, brand: str, proxy: Optional[str]) -> None:
             it["brand"] = brand
             it["proxy"] = proxy
             it["enabled"] = True
+            if bot_name:
+                it["bot_name"] = bot_name
+            if bot_username:
+                it["bot_username"] = bot_username
             exists = True
             break
     if not exists:
-        items.append({
+        item = {
             "token": token,
             "brand": brand,
             "proxy": proxy,
             "enabled": True,
-        })
+        }
+        if bot_name:
+            item["bot_name"] = bot_name
+        if bot_username:
+            item["bot_username"] = bot_username
+        items.append(item)
     _save_agents_store(items)
 
 def _build_agent_router() -> Router:
@@ -142,11 +156,12 @@ def _build_agent_router() -> Router:
     r.message.register(handle_verify_shortcut, Command("verify"))
     # start + free text（menu 已停用）
     r.message.register(handle_start, Command("start"))
-    r.message.register(show_menu, Command("menu"))
-    r.message.register(handle_private_free_text)
-    # admin utils
+    r.message.register(cleanup_database, Command("botcleanup"))
     r.message.register(unban_user, Command("unban"))
     r.message.register(get_user_id, Command("getid"))
+    r.message.register(show_menu, Command("menu"))
+    r.message.register(handle_private_free_text)
+
     # chat member & callbacks
     r.chat_member.register(handle_chat_member_event)
     r.my_chat_member.register(handle_my_chat_member)
@@ -189,90 +204,351 @@ async def handle_inline_callbacks(callback: types.CallbackQuery):
         logger.info(f"[callback] bot={bot_name}({callback.bot.id}) user={callback.from_user.id} data={data} msg_text={src_text!r}")
         if data.startswith("verify|"):
             _, verify_group_id = data.split("|", 1)
-            if not verify_group_id:
-                await callback.message.answer("Please provide verify group id with /pverify <verify_group_id> <code>.")
-                await callback.answer()
-                return
-            _PENDING_VERIFY_GID[str(callback.from_user.id)] = verify_group_id
-            logger.info(f"[callback] bot={bot_name} set pending verify_group_id={verify_group_id} for user={callback.from_user.id}")
+            
+            # 设置pending状态，等待用户输入UID（即使没有verify_group_id也允许输入）
+            if verify_group_id:
+                _PENDING_VERIFY_GID[str(callback.from_user.id)] = verify_group_id
+                logger.info(f"[callback] bot={bot_name} set pending verify_group_id={verify_group_id} for user={callback.from_user.id}")
+            else:
+                # 如果没有verify_group_id，设置为空字符串，表示需要用户提供
+                _PENDING_VERIFY_GID[str(callback.from_user.id)] = ""
+                logger.info(f"[callback] bot={bot_name} set pending verify_group_id=empty for user={callback.from_user.id}")
+            
             await callback.message.bot.send_message(
                 chat_id=callback.message.chat.id,
-                text="Please enter your UID.",
-                reply_markup=ForceReply(selective=True)
+                text="Please enter your UID:",
+                reply_markup=ForceReply(selective=True, placeholder="Enter your UID here"),
+                parse_mode=None
             )
             await callback.answer()
         else:
             await callback.answer()
     except Exception as e:
         logger.error(f"handle_inline_callbacks error: {e}")
+        import traceback
+        logger.error(f"详细错误信息: {traceback.format_exc()}")
+
+async def _generate_invite_link_for_verified_user(message: types.Message, verify_group_id: Optional[str], current_brand: str):
+    """为已验证用户生成新的邀请链接"""
+    try:
+        logger.info(f"[verified_user] Generating invite link for verified user: {message.from_user.id}")
+        
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        bot_name_for_api = await get_bot_display_name(message.bot)
+        
+        # 调用DETAIL_API获取群组信息
+        detail_payload = {
+            "brand": current_brand,
+            "type": "TELEGRAM",
+            "botUsername": bot_name_for_api,
+        }
+        if verify_group_id:
+            detail_payload["verifyGroup"] = verify_group_id
+        
+        logger.info(f"[verified_user] detail_payload: {detail_payload}")
+        logger.info(f"[verified_user] About to call DETAIL_API_BY_BOT: {DETAIL_API_BY_BOT}")
+        
+        async with aiohttp.ClientSession() as session_http:
+            async with session_http.post(DETAIL_API_BY_BOT, headers=headers, data=detail_payload) as detail_response:
+                detail_data = await detail_response.json()
+                logger.info(f"[verified_user] Detail API response: {detail_data}")
+                
+                # 处理API响应格式
+                if isinstance(detail_data.get("data"), dict):
+                    verify_group_chat_id = detail_data.get("data", {}).get("verifyGroup")
+                    info_group_chat_id = detail_data.get("data", {}).get("socialGroup")
+                else:
+                    logger.warning(f"[verified_user] Detail API returned string data: {detail_data.get('data')}")
+                    verify_group_chat_id = None
+                    info_group_chat_id = None
+
+                if info_group_chat_id:
+                    logger.info(f"[verified_user] info_group_chat_id: {info_group_chat_id}, type: {type(info_group_chat_id)}")
+                    chat_id_str = str(info_group_chat_id) if info_group_chat_id else None
+                    if not chat_id_str:
+                        raise ValueError("Invalid chat ID received from API")
+                    
+                    # 检查群组和机器人权限
+                    try:
+                        logger.info(f"[verified_user] Checking chat info for chat_id: {int(chat_id_str)}")
+                        chat_info = await message.bot.get_chat(int(chat_id_str))
+                        logger.info(f"[verified_user] Chat info: {chat_info.title}, type: {chat_info.type}")
+                        
+                        bot_member = await message.bot.get_chat_member(int(chat_id_str), message.bot.id)
+                        logger.info(f"[verified_user] Bot member status: {bot_member.status}")
+                        
+                        if bot_member.status not in ['administrator', 'creator']:
+                            logger.warning(f"[verified_user] Bot is not admin in chat {int(chat_id_str)}, status: {bot_member.status}")
+                            raise Exception(f"Bot is not administrator in chat {int(chat_id_str)}")
+                        
+                    except Exception as chat_check_error:
+                        logger.error(f"[verified_user] Chat check failed: {chat_check_error}")
+                        raise chat_check_error
+                    
+                    # 检查用户是否被ban
+                    try:
+                        user_member = await message.bot.get_chat_member(int(chat_id_str), message.from_user.id)
+                        logger.info(f"[verified_user] User member status: {user_member.status}")
+                        
+                        if user_member.status == "kicked":
+                            logger.warning(f"[verified_user] User {message.from_user.id} is banned in chat {int(chat_id_str)}")
+                            await message.bot.send_message(
+                                chat_id=message.chat.id,
+                                text="⚠️ You are currently banned from the group. Please contact an administrator to be unbanned first.",
+                                parse_mode=None
+                            )
+                            return
+                    except Exception as member_check_error:
+                        logger.warning(f"[verified_user] Could not check user member status: {member_check_error}")
+                        # 继续执行，可能是用户不在群组中
+                    
+                    # 生成邀请链接
+                    try:
+                        invite_link = await message.bot.create_chat_invite_link(
+                            chat_id=int(chat_id_str),
+                            name=f"Re-invite for {message.from_user.full_name}",
+                            # 不设置member_limit，允许重复使用
+                            # 不设置expire_date，创建永久链接
+                        )
+                        logger.info(f"[verified_user] Successfully created invite link: {invite_link.invite_link}")
+                        
+                        # 发送成功消息
+                        success_message = f"✅ Welcome back, {message.from_user.full_name}!\n\nYou are already verified. Here's your invitation link:\n\n{invite_link.invite_link}\n\n💡 This link can be used multiple times and never expires."
+                        await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode=None)
+                        
+                    except Exception as invite_error:
+                        logger.error(f"[verified_user] Failed to create invite link: {invite_error}")
+                        await message.bot.send_message(
+                            chat_id=message.chat.id,
+                            text="✅ You are already verified, but unable to generate invitation link at this time. Please contact support for group access.",
+                            parse_mode=None
+                        )
+                else:
+                    logger.warning(f"[verified_user] No group information available")
+                    await message.bot.send_message(
+                        chat_id=message.chat.id,
+                        text="✅ You are already verified, but no group information is available. Please contact support.",
+                        parse_mode=None
+                    )
+                    
+    except Exception as e:
+        logger.error(f"_generate_invite_link_for_verified_user error: {e}")
+        import traceback
+        logger.error(f"_generate_invite_link_for_verified_user traceback: {traceback.format_exc()}")
+        try:
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="✅ You are already verified, but an error occurred while generating the invitation link. Please try again later.",
+                parse_mode=None
+            )
+        except Exception as send_error:
+            logger.error(f"Failed to send error message: {send_error}")
 
 async def _perform_private_verify_flow(message: types.Message, verify_group_id: Optional[str], verify_code: str, current_brand: str):
     """執行私聊驗證流程（PRIVATE 模式）。
     - 若無 verify_group_id，僅以 botId/botName 與後端溝通，由後端映射到對應群組
     """
     try:
+        logger.info(f"[verify_flow] Starting verification for user: {message.from_user.id}, UID: {verify_code}, verify_group_id: {verify_group_id}")
+        logger.info(f"[verify_flow] UID type: {type(verify_code)}, value: {verify_code}")
         user_id = str(message.from_user.id)
         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
 
-        verification_status = await is_user_verified(user_id, str(verify_group_id), str(verify_code))
+        # 检查用户是否已验证（全局UID检查，无论是否有verify_group_id）
+        verification_status = await is_user_verified(user_id, str(verify_group_id) if verify_group_id else "", str(verify_code))
         if verification_status == "warning":
             await message.bot.send_message(
                 chat_id=message.chat.id,
-                text="<b>This UID has already been verified</b>",
+                text="<b>This UID has already been verified by another user</b>",
                 parse_mode="HTML"
+            )
+            return
+        elif verification_status == "verified":
+            # 用户已验证过，直接生成新的邀请链接
+            logger.info(f"[verify_flow] User {user_id} already verified, generating new invite link")
+            await _generate_invite_link_for_verified_user(message, verify_group_id, current_brand)
+            return
+        elif verification_status == "error":
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="⚠️ Verification service is temporarily unavailable. Please try again later or contact the administrator.",
+                parse_mode=None
             )
             return
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         admin_mention = "admin"
         bot_name_for_api = await get_bot_display_name(message.bot)
+        logger.info(f"[verify_flow] bot_name_for_api: {bot_name_for_api}, type: {type(bot_name_for_api)}")
+        
         verify_payload = {
             "code": verify_code,
             "brand": current_brand,
             "type": "TELEGRAM",
-            "botId": message.bot.id,
-            "botName": bot_name_for_api,
-            "mode": "PRIVATE",
+            "botUsername": bot_name_for_api,
         }
         if verify_group_id:
             verify_payload["verifyGroup"] = verify_group_id
+        
+        logger.info(f"[verify_flow] verify_payload: {verify_payload}")
+        logger.info(f"[verify_flow] About to call VERIFY_API_BY_BOT: {VERIFY_API_BY_BOT}")
+        
         async with aiohttp.ClientSession() as session_http:
-            async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
+            async with session_http.post(VERIFY_API_BY_BOT, headers=headers, data=verify_payload) as response:
+                logger.info(f"[verify_flow] VERIFY_API_BY_BOT response status: {response.status}")
                 response_data = await response.json()
+                logger.info(f"[verify_flow] VERIFY_API_BY_BOT response data: {response_data}")
+                
+                # 检查服务不可用的情况
+                if response.status == 500 and "Load balancer does not have available server" in str(response_data):
+                    logger.error(f"[verify_flow] Backend service unavailable: {response_data}")
+                    await message.bot.send_message(
+                        chat_id=message.chat.id,
+                        text="⚠️ Verification service is temporarily unavailable. Please try again later or contact the administrator.",
+                        parse_mode=None
+                    )
+                    return
+                
                 if response.status == 200 and "verification successful" in response_data.get("data", ""):
+                    logger.info(f"[verify_flow] Verification successful, calling DETAIL_API_BY_BOT")
                     detail_payload = {
                         "brand": current_brand,
                         "type": "TELEGRAM",
-                        "botId": message.bot.id,
-                        "botName": bot_name_for_api,
-                        "mode": "PRIVATE",
+                        "botUsername": bot_name_for_api,
                     }
                     if verify_group_id:
                         detail_payload["verifyGroup"] = verify_group_id
-                    async with session_http.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
+                    
+                    logger.info(f"[verify_flow] detail_payload: {detail_payload}")
+                    logger.info(f"[verify_flow] About to call DETAIL_API_BY_BOT: {DETAIL_API_BY_BOT}")
+                    
+                    async with session_http.post(DETAIL_API_BY_BOT, headers=headers, data=detail_payload) as detail_response:
                         detail_data = await detail_response.json()
-                        verify_group_chat_id = detail_data.get("data", {}).get("verifyGroup")
-                        info_group_chat_id = detail_data.get("data", {}).get("socialGroup")
+                        logger.info(f"[verify_flow] Detail API response: {detail_data}")
+                        
+                        # 处理API响应格式
+                        if isinstance(detail_data.get("data"), dict):
+                            verify_group_chat_id = detail_data.get("data", {}).get("verifyGroup")
+                            info_group_chat_id = detail_data.get("data", {}).get("socialGroup")
+                        else:
+                            # 如果data是字符串，尝试从其他地方获取群组信息
+                            logger.warning(f"[verify_flow] Detail API returned string data: {detail_data.get('data')}")
+                            verify_group_chat_id = None
+                            info_group_chat_id = None
 
                     try:
-                        invite_link = await message.bot.create_chat_invite_link(
-                            chat_id=info_group_chat_id,
-                            name=f"Invite for {message.from_user.full_name}",
-                        )
-                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), str(verify_code))
-                        response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
-                        response_data["data"] = response_data["data"].replace("@{username}", user_mention)
-                        # 移除 @{admin} 替換
-                        await message.bot.send_message(chat_id=message.chat.id, text=response_data["data"], parse_mode="HTML")
+                        if info_group_chat_id:
+                            logger.info(f"[verify_flow] info_group_chat_id: {info_group_chat_id}, type: {type(info_group_chat_id)}")
+                            # 确保chat_id是字符串类型
+                            chat_id_str = str(info_group_chat_id) if info_group_chat_id else None
+                            if not chat_id_str:
+                                raise ValueError("Invalid chat ID received from API")
+                            
+                            # 先检查群组是否存在和机器人权限
+                            try:
+                                logger.info(f"[verify_flow] Checking chat info for chat_id: {int(chat_id_str)}")
+                                chat_info = await message.bot.get_chat(int(chat_id_str))
+                                logger.info(f"[verify_flow] Chat info: {chat_info.title}, type: {chat_info.type}")
+                                
+                                # 检查机器人是否为群组管理员
+                                bot_member = await message.bot.get_chat_member(int(chat_id_str), message.bot.id)
+                                logger.info(f"[verify_flow] Bot member status: {bot_member.status}")
+                                
+                                if bot_member.status not in ['administrator', 'creator']:
+                                    logger.warning(f"[verify_flow] Bot is not admin in chat {int(chat_id_str)}, status: {bot_member.status}")
+                                    raise Exception(f"Bot is not administrator in chat {int(chat_id_str)}")
+                                
+                            except Exception as chat_check_error:
+                                logger.error(f"[verify_flow] Chat check failed: {chat_check_error}")
+                                raise chat_check_error
+                            
+                            # 检查用户是否被ban
+                            try:
+                                user_member = await message.bot.get_chat_member(int(chat_id_str), message.from_user.id)
+                                logger.info(f"[verify_flow] User member status: {user_member.status}")
+                                
+                                if user_member.status == "kicked":
+                                    logger.warning(f"[verify_flow] User {message.from_user.id} is banned in chat {int(chat_id_str)}")
+                                    await message.bot.send_message(
+                                        chat_id=message.chat.id,
+                                        text="⚠️ You are currently banned from the group. Please contact an administrator to be unbanned first.",
+                                        parse_mode=None
+                                    )
+                                    return
+                            except Exception as member_check_error:
+                                logger.warning(f"[verify_flow] Could not check user member status: {member_check_error}")
+                                # 继续执行，可能是用户不在群组中
+                            
+                            logger.info(f"[verify_flow] About to call create_chat_invite_link with chat_id: {int(chat_id_str)}")
+                            try:
+                                invite_link = await message.bot.create_chat_invite_link(
+                                    chat_id=int(chat_id_str),  # Telegram API需要整数类型
+                                    name=f"Invite for {message.from_user.full_name}",
+                                    # 不设置member_limit，允许重复使用
+                                    # 不设置expire_date，创建永久链接
+                                )
+                                logger.info(f"[verify_flow] Successfully created invite link: {invite_link.invite_link}")
+                                
+                                logger.info(f"[verify_flow] Calling add_verified_user with: user_id={user_id}, verify_group_chat_id={verify_group_chat_id}, info_group_chat_id={info_group_chat_id}, verify_code={verify_code} (type: {type(verify_code)})")
+                                await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
+                                
+                                logger.info(f"[verify_flow] Original API response: {response_data['data']}")
+                                logger.info(f"[verify_flow] User full name: {message.from_user.full_name}")
+                                
+                                response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
+                                response_data["data"] = response_data["data"].replace("@{username}", f"@{message.from_user.full_name}")
+                                logger.info(f"[verify_flow] Final message after replacement: {response_data['data']}")
+                                # 清理HTML标签并发送消息
+                                import re
+                                clean_text = re.sub(r'<[^>]*>', '', response_data["data"])
+                                clean_text = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_text)
+                                # 添加链接说明
+                                clean_text += "\n\n💡 This link can be used multiple times and never expires."
+                                await message.bot.send_message(chat_id=message.chat.id, text=clean_text, parse_mode="HTML")
+                            except Exception as invite_error:
+                                logger.error(f"[verify_flow] Failed to create invite link: {invite_error}")
+                                # 即使无法创建邀请链接，仍然保存验证记录
+                                try:
+                                    logger.info(f"[verify_flow] Saving verification record without invite link")
+                                    await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
+                                except Exception as save_error:
+                                    logger.error(f"[verify_flow] Failed to save verification record: {save_error}")
+                                
+                                # 发送验证成功消息，但不包含邀请链接
+                                success_message = f"✅ Verification successful!\n\n{message.from_user.full_name}, your account has been verified.\n\nNote: Unable to generate invitation link at this time. Please contact support for group access."
+                                await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode=None)
+                        else:
+                            # 如果没有群组信息，只发送验证成功消息
+                            logger.warning(f"[verify_flow] No group information available, sending success message only")
+                            response_data["data"] = response_data["data"].replace("@{username}", f"@{message.from_user.full_name}")
+                            # 清理HTML标签并发送消息
+                            import re
+                            clean_text = re.sub(r'<[^>]*>', '', response_data["data"])
+                            clean_text = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_text)
+                            await message.bot.send_message(chat_id=message.chat.id, text=clean_text, parse_mode="HTML")
                     except Exception as e:
                         logger.error(f"[pverify] 生成邀请链接失败: {e}")
                         await message.bot.send_message(chat_id=message.chat.id, text="Verification successful, but an error occurred while generating the invitation link. Please try again later.")
                 else:
                     error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
-                    # 移除 @{admin} 替換
-                    await message.bot.send_message(chat_id=message.chat.id, text=error_message, parse_mode="HTML")
+                    # 清理HTML标签并发送错误消息
+                    import re
+                    clean_error = re.sub(r'<[^>]*>', '', error_message)  # 移除所有HTML标签
+                    clean_error = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_error)  # 重新添加链接
+                    await message.bot.send_message(chat_id=message.chat.id, text=clean_error, parse_mode="HTML")
     except Exception as e:
         logger.error(f"_perform_private_verify_flow error: {e}")
+        logger.error(f"_perform_private_verify_flow error type: {type(e)}")
+        import traceback
+        logger.error(f"_perform_private_verify_flow traceback: {traceback.format_exc()}")
+        try:
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="Verification failed due to an error. Please try again later.",
+                parse_mode=None
+            )
+        except Exception as send_error:
+            logger.error(f"Failed to send error message: {send_error}")
 
 async def heartbeat(bot: Bot, interval: int = 60):
     """定期向 Telegram 服务器发送心跳请求"""
@@ -463,15 +739,20 @@ async def handle_verify_command(message: types.Message):
                         verify_group_chat_id = detail_data.get("data").get("verifyGroup")  # 替换为你的资讯群 ID
                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
                     try:
+                        # 确保chat_id是整数类型
+                        chat_id_int = int(info_group_chat_id) if info_group_chat_id else None
+                        if not chat_id_int:
+                            raise ValueError("Invalid chat ID received from API")
+                        
                         invite_link = await message.bot.create_chat_invite_link(
-                            chat_id=info_group_chat_id,
+                            chat_id=chat_id_int,
                             name=f"Invite for {message.from_user.full_name}",
-                            # member_limit=1,  # 限制链接只能被1人使用
-                            # expire_date=int(time.time()) + 3600  # 链接1小时后过期
+                            # 不设置member_limit，允许重复使用
+                            # 不设置expire_date，创建永久链接
                         )
 
                         # 添加到数据库
-                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), str(verify_code))
+                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
 
                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
@@ -503,7 +784,7 @@ async def handle_verify_command(message: types.Message):
         logger.error(f"调用验证 API 时出错: {e}")
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="验证时发生错误，请稍后再试。"
+            text="Verification failed due to an error. Please try again later."
         )
 
 @router.message(Command("pverify"))
@@ -549,15 +830,13 @@ async def handle_private_verify_command(message: types.Message):
             "code": verify_code,
             "brand": current_brand,
             "type": "TELEGRAM",
-            "botId": message.bot.id,
-            "botName": bot_name_for_api,
-            "mode": "PRIVATE",
+            "botUsername": bot_name_for_api,
         }
         if verify_group_id:
             verify_payload["verifyGroup"] = verify_group_id
 
         async with aiohttp.ClientSession() as session_http:
-            async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
+            async with session_http.post(VERIFY_API_BY_BOT, headers=headers, data=verify_payload) as response:
                 response_data = await response.json()
                 logger.info(f"[pverify] Verify API Response: {response_data}")
 
@@ -565,24 +844,29 @@ async def handle_private_verify_command(message: types.Message):
                     detail_payload = {
                         "brand": current_brand,
                         "type": "TELEGRAM",
-                        "botId": message.bot.id,
-                        "botName": bot_name_for_api,
-                        "mode": "PRIVATE",
+                        "botUsername": bot_name_for_api,
                     }
                     if verify_group_id:
                         detail_payload["verifyGroup"] = verify_group_id
-                    async with session_http.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
+                    async with session_http.post(DETAIL_API_BY_BOT, headers=headers, data=detail_payload) as detail_response:
                         detail_data = await detail_response.json()
                         verify_group_chat_id = detail_data.get("data").get("verifyGroup")
                         info_group_chat_id = detail_data.get("data").get("socialGroup")
 
                     try:
+                        # 确保chat_id是整数类型
+                        chat_id_int = int(info_group_chat_id) if info_group_chat_id else None
+                        if not chat_id_int:
+                            raise ValueError("Invalid chat ID received from API")
+                        
                         invite_link = await message.bot.create_chat_invite_link(
-                            chat_id=info_group_chat_id,
+                            chat_id=chat_id_int,
                             name=f"Invite for {message.from_user.full_name}",
+                            # 不设置member_limit，允许重复使用
+                            # 不设置expire_date，创建永久链接
                         )
 
-                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), str(verify_code))
+                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
 
                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
@@ -611,7 +895,7 @@ async def handle_private_verify_command(message: types.Message):
         logger.error(f"[pverify] 調用驗證 API 時出錯: {e}")
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="验证时发生错误，请稍后再试。"
+            text="Verification failed due to an error. Please try again later."
         )
 
 @router.message(Command("verify"))
@@ -661,7 +945,7 @@ async def handle_start(message: types.Message):
 
         current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
 
-        # 先嘗試私聊模式的歡迎語：以 botId/botName 溝通
+        # 先嘗試私聊模式的歡迎語：使用新的 by_bot 接口
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         chosen_verify_group = None
         welcome_message = None
@@ -670,36 +954,31 @@ async def handle_start(message: types.Message):
             payload_private = {
                 "brand": current_brand,
                 "type": "TELEGRAM",
-                "botId": message.bot.id,
-                "botName": bot_name_for_api,
-                "mode": "PRIVATE",
+                "botUsername": bot_name_for_api,
             }
+            logger.info(f"[start] 尝试调用新的欢迎语API: {WELCOME_API_BY_BOT}")
+            logger.info(f"[start] 请求参数: {payload_private}")
             async with aiohttp.ClientSession() as session:
-                async with session.post(WELCOME_API, headers=headers, data=payload_private) as resp:
+                async with session.post(WELCOME_API_BY_BOT, headers=headers, data=payload_private) as resp:
+                    logger.info(f"[start] 新API响应状态: {resp.status}")
                     if resp.status == 200:
                         data = await resp.json()
+                        logger.info(f"[start] 新API响应数据: {data}")
                         # 允許後端回傳 data（歡迎語），可選回傳 verifyGroup
                         if data.get("data"):
                             welcome_message = data.get("data")
-                            chosen_verify_group = (data.get("verifyGroup") or data.get("data", {}).get("verifyGroup") or None)
-        except Exception:
+                            # 从响应中获取 verifyGroup，如果 data 是字符串则从根级别获取
+                            chosen_verify_group = data.get("verifyGroup")
+                            logger.info(f"[start] 成功获取欢迎语，verifyGroup: {chosen_verify_group}")
+                    else:
+                        logger.warning(f"[start] 新API调用失败，状态码: {resp.status}")
+        except Exception as e:
+            logger.error(f"[start] 调用新API时发生异常: {e}")
             pass
 
-        # 若私聊模式未取到，退回群組模式（遍歷已知 verify 群）
+        # 不再使用轮询方式，如果新API失败就直接使用默认欢迎语
         if not welcome_message:
-            for gid in list(group_chat_ids):
-                payload = {"verifyGroup": str(gid), "brand": current_brand, "type": "TELEGRAM"}
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(WELCOME_API, headers=headers, data=payload) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                if data.get("data"):
-                                    chosen_verify_group = str(gid)
-                                    welcome_message = data.get("data")
-                                    break
-                except Exception:
-                    continue
+            logger.info(f"[start] 新API失败，直接使用默认欢迎语")
 
         # 構建 Verify 按鈕（帶 verifyGroup 提示）
         verify_callback = f"verify|{chosen_verify_group or ''}"
@@ -709,18 +988,21 @@ async def handle_start(message: types.Message):
         bot_name = await get_bot_display_name(message.bot)
         logger.info(f"[start] bot={bot_name}({message.bot.id}) built verify button with callback={verify_callback}")
 
-        # 替換 username 並修正不合法的 <code> 標籤
+        # 替換 username 並修正不合法的 HTML 標籤
         user_mention = f'<a href="tg://user?id={message.from_user.id}">{message.from_user.full_name}</a>'
         if welcome_message:
             safe_text = welcome_message.replace("@{username}", user_mention)
+            # 清理无效的HTML标签
             safe_text = safe_text.replace("<code>", "`").replace("</code>", "`")
+            # 移除其他无效的HTML标签
+            import re
+            safe_text = re.sub(r'<[^>]*>', '', safe_text)  # 移除所有HTML标签
+            # 重新添加有效的链接
+            safe_text = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', safe_text)
             await message.bot.send_message(chat_id=message.chat.id, text=safe_text, parse_mode="HTML", reply_markup=inline_kb)
         else:
-            fallback = (
-                f"Welcome! You are chatting with the {current_brand} verification bot.\n\n"
-                "Tap the Verify button below to start verification."
-            )
-            await message.bot.send_message(chat_id=message.chat.id, text=fallback, reply_markup=inline_kb)
+            fallback = "Unable to obtain the corresponding welcome text, please check whether the configuration is correct"
+            await message.bot.send_message(chat_id=message.chat.id, text=fallback)
     except Exception as e:
         logger.error(f"handle_start error: {e}")
 
@@ -758,22 +1040,38 @@ async def handle_private_free_text(message: types.Message):
         # 如果先前按了 Verify 並記錄 verify_group_id，且此訊息是純數字，則直接驗證
         pending_gid = _PENDING_VERIFY_GID.get(str(message.from_user.id))
 
-        # 先嘗試從文本擷取數字
-        m = re.search(r"\d{4,}", text)
+        # 先嘗試從文本擷取數字（支持1位以上的数字）
+        m = re.search(r"\d+", text)
         if not m:
             # 無數字：忽略
             return
 
         code = m.group(0)
-        current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
-        if pending_gid:
-            await _perform_private_verify_flow(message, pending_gid, code, current_brand)
-            # 清除 pending
-            _PENDING_VERIFY_GID.pop(str(message.from_user.id), None)
+        # 检查UID长度是否合理（1-20位数字）
+        if len(code) < 1 or len(code) > 20:
+            logger.warning(f"Invalid UID length: {len(code)} for code: {code}")
             return
-
-        # 未知 verify_group_id：提示用戶補上
-        await message.bot.send_message(chat_id=message.chat.id, text=("Detected verification code.\nPlease send: /pverify <verify_group_id> " + code))
+        
+        logger.info(f"[free_text] Detected UID: {code}, user: {message.from_user.id}, pending_gid: {pending_gid}")
+        current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+        
+        # 统一处理：所有回复框消息都直接调用验证API
+        try:
+            # 获取verify_group_id（如果有的话）
+            verify_group_id = pending_gid if pending_gid else None
+            logger.info(f"[free_text] Starting verification flow for UID: {code}, verify_group_id: {verify_group_id}")
+            await _perform_private_verify_flow(message, verify_group_id, code, current_brand)
+        except Exception as e:
+            logger.error(f"[free_text] Error in verification flow: {e}")
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="Verification failed due to an error. Please try again.",
+                parse_mode=None
+            )
+        finally:
+            # 清除 pending
+            if str(message.from_user.id) in _PENDING_VERIFY_GID:
+                _PENDING_VERIFY_GID.pop(str(message.from_user.id), None)
     except Exception as e:
         logger.error(f"handle_private_free_text error: {e}")
 
@@ -848,6 +1146,40 @@ async def get_user_id(message: types.Message):
         response += f"🔗 username：@{username}\n"
 
     await message.reply(response, parse_mode="HTML")
+
+@router.message(Command("botcleanup"))
+async def cleanup_database(message: types.Message):
+    """清理重复的验证码记录（仅管理员可用）"""
+    try:
+        logger.info(f"[cleanup] Received cleanup command from user: {message.from_user.id}")
+        
+        # 检查是否为允许使用该命令的管理员
+        if message.from_user.id not in ALLOWED_ADMIN_IDS:
+            logger.warning(f"[cleanup] User {message.from_user.id} not in allowed admin list: {ALLOWED_ADMIN_IDS}")
+            await message.reply("❌ You do not have permission to use this command.")
+            return
+
+        try:
+            bot_manager.record_activity(message.bot.id)
+        except Exception:
+            pass
+
+        logger.info(f"[cleanup] Starting cleanup process for admin: {message.from_user.id}")
+        await message.reply("🔄 Starting to clean up duplicate verification records...")
+        
+        # 导入清理函数
+        from db_handler_aio import cleanup_duplicate_verify_codes
+        cleaned_count = await cleanup_duplicate_verify_codes()
+        
+        logger.info(f"[cleanup] Cleanup completed, cleaned {cleaned_count} records")
+        await message.reply(f"✅ Cleanup complete! Cleaned {cleaned_count} duplicate records.")
+        logger.info(f"Admin {message.from_user.id} performed database cleanup, cleaned {cleaned_count} duplicate records")
+
+    except Exception as e:
+        logger.error(f"[cleanup] Error during cleanup: {e}")
+        import traceback
+        logger.error(f"[cleanup] Traceback: {traceback.format_exc()}")
+        await message.reply(f"❌ 清理失败: {e}")
 
 @router.chat_member()
 async def handle_chat_member_event(event: ChatMemberUpdated):
@@ -1374,7 +1706,10 @@ async def start_aiohttp_server(bot: Bot, manager: BotManager):
             )
             # 持久化這個代理 bot，方便重啟恢復
             try:
-                _persist_agent(token, brand, None)
+                # 获取 bot 信息用于持久化
+                bot_name = result.get("bot_name")
+                bot_username = result.get("username")
+                _persist_agent(token, brand, None, bot_name, bot_username)
             except Exception as e:
                 logger.error(f"persist agent failed: {e}")
 
@@ -1500,7 +1835,7 @@ async def main():
         logger.info("开始清理资源...")
         
         # 清理 HTTP 服务器
-        if 'http_server_runner' in locals():
+        if 'http_server_runner' in locals() and http_server_runner is not None:
             try:
                 await http_server_runner.cleanup()
                 logger.info("HTTP 服务器已清理")
@@ -1508,22 +1843,54 @@ async def main():
                 logger.error(f"清理 HTTP 服务器时出错: {e}")
         
         # 取消所有未完成的任务
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        logger.info(f"正在取消未完成的任务: {len(tasks)} 个")
-        for task in tasks:
-            task.cancel()
+        try:
+            tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            logger.info(f"正在取消未完成的任务: {len(tasks)} 个")
+            
+            if tasks:
+                # 取消所有任务
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                
+                # 等待任务完成，忽略取消异常
+                try:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                except Exception as e:
+                    logger.debug(f"等待任务完成时出错: {e}")
+                
+            logger.info("所有任务已成功取消")
+        except Exception as e:
+            logger.error(f"取消任务时出错: {e}")
         
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        
-        logger.info("所有任务已成功取消")
+        # 关闭数据库连接
+        try:
+            from db_handler_aio import engine
+            await engine.dispose()
+            logger.info("数据库连接已关闭")
+        except Exception as e:
+            logger.error(f"关闭数据库连接时出错: {e}")
 
 if __name__ == "__main__":
+    loop = None
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(main())
     except KeyboardInterrupt:
-        logger.info("捕获 KeyboardInterrupt，成功退出程序。")
+        logger.info("捕获 KeyboardInterrupt，正在安全退出程序...")
+    except Exception as e:
+        logger.error(f"程序运行时出错: {e}")
     finally:
-        loop.close()
+        if loop and not loop.is_closed():
+            try:
+                # 等待所有任务完成
+                pending = asyncio.all_tasks(loop)
+                if pending:
+                    logger.info(f"等待 {len(pending)} 个任务完成...")
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception as e:
+                logger.debug(f"等待任务完成时出错: {e}")
+            finally:
+                loop.close()
+                logger.info("程序已安全退出")
