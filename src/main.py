@@ -484,8 +484,7 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                                 invite_link = await message.bot.create_chat_invite_link(
                                     chat_id=int(chat_id_str),  # Telegram API需要整数类型
                                     name=f"Invite for {message.from_user.full_name}",
-                                    # 不设置member_limit，允许重复使用
-                                    # 不设置expire_date，创建永久链接
+                                    member_limit=1,  # 單次可用
                                 )
                                 logger.info(f"[verify_flow] Successfully created invite link: {invite_link.invite_link}")
                                 
@@ -502,8 +501,8 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                                 import re
                                 clean_text = re.sub(r'<[^>]*>', '', response_data["data"])
                                 clean_text = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_text)
-                                # 添加链接说明
-                                clean_text += "\n\n💡 This link can be used multiple times and never expires."
+                                # 添加鏈接說明（單次可用）
+                                clean_text += "\n\n💡 This invite link is single-use and valid only for you."
                                 await message.bot.send_message(chat_id=message.chat.id, text=clean_text, parse_mode="HTML")
                             except Exception as invite_error:
                                 logger.error(f"[verify_flow] Failed to create invite link: {invite_error}")
@@ -747,8 +746,7 @@ async def handle_verify_command(message: types.Message):
                         invite_link = await message.bot.create_chat_invite_link(
                             chat_id=chat_id_int,
                             name=f"Invite for {message.from_user.full_name}",
-                            # 不设置member_limit，允许重复使用
-                            # 不设置expire_date，创建永久链接
+                            member_limit=1,  # 單次可用
                         )
 
                         # 添加到数据库
@@ -756,10 +754,11 @@ async def handle_verify_command(message: types.Message):
 
                         response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
                         response_data["data"] = response_data["data"].replace("@{username}", user_mention)
-                        # 移除 @{admin} 替換
+                        # 以群主替換 @{admin}/{admin}
+                        response_data["data"] = response_data["data"].replace("@{admin}", admin_mention).replace("{admin}", admin_mention)
                         response_message  = await message.bot.send_message(
                             chat_id=message.chat.id,
-                            text=response_data["data"],
+                            text=response_data["data"] + "\n\n💡 This invite link is single-use and valid only for you.",
                             parse_mode="HTML"
                         )
                         asyncio.create_task(delete_message_after_delay(message.bot, response_message.chat.id, response_message.message_id, 60))
@@ -774,7 +773,8 @@ async def handle_verify_command(message: types.Message):
                 else:
                     # 将接口的返回数据直接返回给用户
                     error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
-                    # 移除 @{admin} 替換
+                    # 以群主替換 @{admin}/{admin}
+                    error_message = error_message.replace("@{admin}", admin_mention).replace("{admin}", admin_mention)
                     await message.bot.send_message(
                         chat_id=message.chat.id,
                         text=error_message,
@@ -862,8 +862,7 @@ async def handle_private_verify_command(message: types.Message):
                         invite_link = await message.bot.create_chat_invite_link(
                             chat_id=chat_id_int,
                             name=f"Invite for {message.from_user.full_name}",
-                            # 不设置member_limit，允许重复使用
-                            # 不设置expire_date，创建永久链接
+                            member_limit=1,  # 單次可用
                         )
 
                         await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
@@ -874,7 +873,7 @@ async def handle_private_verify_command(message: types.Message):
 
                         await message.bot.send_message(
                             chat_id=message.chat.id,
-                            text=response_data["data"],
+                            text=response_data["data"] + "\n\n💡 This invite link is single-use and valid only for you.",
                             parse_mode="HTML"
                         )
                     except Exception as e:
@@ -1258,15 +1257,22 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                 # 替换 @{username} 占位符
                 welcome_message = welcome_message.replace("@{username}", user_mention)
 
-                # 提取 referral link
-                referral_start = welcome_message.find("https://")
-                referral_end = welcome_message.find("Step 2", referral_start) if referral_start != -1 else -1
-                referral_link = None
-                if referral_start != -1:
-                    referral_link = (
-                        welcome_message[referral_start:referral_end].strip() if referral_end != -1 else welcome_message[referral_start:]
-                    )
-                    referral_link = referral_link.replace("</a>", "").replace("\n", "").strip()
+                # 提取 referral link（兼容 <a href> 或純文本連結，並去除尾隨標點符號）
+                def _extract_first_url(text: str) -> Optional[str]:
+                    # 先匹配超鏈接 href
+                    m = re.search(r'href=["\'](https?://[^"\']+)["\']', text)
+                    if m:
+                        return m.group(1).strip()
+                    # 再匹配純文本 URL
+                    m = re.search(r'(https?://[^\s<>")\]]+)', text)
+                    if m:
+                        url = m.group(1)
+                        # 去除常見尾隨標點
+                        url = url.rstrip('.,;!?)"\']}' )
+                        return url.strip()
+                    return None
+
+                referral_link = _extract_first_url(welcome_message)
                 if not referral_link:
                     logger.error("Referral link 提取失败，跳过欢迎消息发送")
                     return
