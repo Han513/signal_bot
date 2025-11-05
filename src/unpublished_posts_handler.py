@@ -121,8 +121,8 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
         # 如果有圖片，先下載一次
         if image:
             if not image.startswith("http"):
-                # image = f"https://sp.signalcms.com{image}"
-                image = f"http://172.25.183.139:5003{image}"
+                image = f"https://sp.signalcms.com{image}"
+                # image = f"http://172.25.183.139:5003{image}"
             temp_file_path = f"/tmp/image_{post_id}.jpg"
             try:
                 async with aiohttp.ClientSession() as session:

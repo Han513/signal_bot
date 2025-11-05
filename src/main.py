@@ -55,6 +55,123 @@ DISCORD_BOT = os.getenv("DISCORD_BOT")
 BOT_REGISTER_API_KEY = os.getenv("BOT_REGISTER_API_KEY")
 DEFAULT_BRAND = os.getenv("DEFAULT_BRAND", "BYD")
 
+# -------------------- 多語言："UID 已被驗證" 文案處理 --------------------
+# 僅針對「This UID has already been verified." 這句固定文案做本地多語映射
+_UID_VERIFIED_MESSAGES = {
+    "en": "This UID has already been verified.",
+    "zh": "此 UID 已被驗證過",
+    "ru": "Этот UID уже был верифицирован.",
+    "id": "UID ini telah diverifikasi.",
+    "ja": "このUIDは既に認証済みです。",
+    "pt": "Este UID já foi verificado.",
+    "fr": "Cet UID a déjà été vérifié.",
+    "es": "Este UID ya ha sido verificado.",
+    "tr": "Bu UID zaten doğrulandı.",
+    "de": "Diese UID wurde bereits verifiziert.",
+    "it": "Questo UID è già stato verificato.",
+    "ar": "تم التحقق من هذا المعرف مسبقًا.",
+    "fa": "این UID قبلاً تأیید شده است.",
+    "vi": "UID này đã được xác minh.",
+    "tl": "Ang UID na ito ay na-verify na.",
+    "th": "UID นี้ได้รับการยืนยันแล้ว",
+    "da": "Denne UID er allerede blevet bekræftet.",
+    "pl": "Ten UID został już zweryfikowany.",
+    "ko": "이 UID는 이미 인증되었습니다.",
+}
+
+def _normalize_lang_for_uid_msg(lang: Optional[str]) -> str:
+    """將 API 返回的 lang 正規化到上述鍵值。
+    支援格式：en/en_US/en-GB、zh/zh-CN/zh-TW、in/id、pt-PT 等，未知時回退 en。
+    """
+    if not lang:
+        return "en"
+    raw = str(lang).strip()
+    # 快速路徑
+    if raw in ("en", "en_US", "en-GB", "en-Us", "en-US"):
+        return "en"
+    if raw in ("zh", "zh_CN", "zh-CN", "zh-TW", "zh_TW", "zh-Hant", "zh-Hans", "zh-HK"):
+        return "zh"
+    code = raw.replace("_", "-").lower()
+    primary = code.split("-")[0]
+    if primary == "in":
+        primary = "id"
+    return primary if primary in _UID_VERIFIED_MESSAGES else "en"
+
+def _get_uid_verified_msg_by_lang(lang: Optional[str]) -> str:
+    key = _normalize_lang_for_uid_msg(lang)
+    return _UID_VERIFIED_MESSAGES.get(key, _UID_VERIFIED_MESSAGES["en"]) 
+
+# -------------------- 驗證接口返回文本抽取輔助 --------------------
+def _get_api_message_text(resp: dict) -> str:
+    """從接口返回中提取可展示的文本。
+    支援兩種格式：
+    1) data 為字符串 -> 直接返回
+    2) data 為對象 -> 優先取 data.msg
+    其他情況返回空字串
+    """
+    try:
+        data = resp.get("data")
+        if isinstance(data, str):
+            return data
+        if isinstance(data, dict):
+            msg = data.get("msg")
+            if isinstance(msg, str):
+                return msg
+        return ""
+    except Exception:
+        return ""
+
+async def _fetch_lang_from_verify_api_by_bot(message: types.Message, verify_group_id: Optional[str], verify_code: str, current_brand: str) -> Optional[str]:
+    """在私聊場景呼叫 VERIFY_API_BY_BOT 僅為取得語言。失敗則回傳 None。"""
+    try:
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        bot_name_for_api = await get_bot_display_name(message.bot)
+        payload = {
+            "code": verify_code,
+            "brand": current_brand,
+            "type": "TELEGRAM",
+            "botUsername": bot_name_for_api,
+        }
+        if verify_group_id:
+            payload["verifyGroup"] = verify_group_id
+        async with aiohttp.ClientSession() as session_http:
+            async with session_http.post(VERIFY_API_BY_BOT, headers=headers, data=payload) as resp:
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return None
+                # 兼容 data.lang 與根級 lang
+                lang = None
+                if isinstance(data.get("data"), dict):
+                    lang = data.get("data", {}).get("lang")
+                if not lang:
+                    lang = data.get("lang")
+                return lang
+    except Exception:
+        return None
+
+from typing import Union
+async def _fetch_lang_from_verify_api_group(message: types.Message, chat_id: Union[int, str], verify_code: str, current_brand: str) -> Optional[str]:
+    """在群聊場景呼叫 VERIFY_API 僅為取得語言。失敗則回傳 None。"""
+    try:
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        payload = {"verifyGroup": chat_id, "code": verify_code, "brand": current_brand, "type": "TELEGRAM"}
+        async with aiohttp.ClientSession() as session_http:
+            async with session_http.post(VERIFY_API, headers=headers, data=payload) as resp:
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return None
+                # 兼容 data.lang 與根級 lang
+                lang = None
+                if isinstance(data.get("data"), dict):
+                    lang = data.get("data", {}).get("lang")
+                if not lang:
+                    lang = data.get("lang")
+                return lang
+    except Exception:
+        return None
+
 # 新的私聊专用接口
 WELCOME_API_BY_BOT = os.getenv("WELCOME_API_BY_BOT")
 VERIFY_API_BY_BOT = os.getenv("VERIFY_API_BY_BOT")
@@ -357,9 +474,12 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
         # 检查用户是否已验证（全局UID检查，无论是否有verify_group_id）
         verification_status = await is_user_verified(user_id, str(verify_group_id) if verify_group_id else "", str(verify_code))
         if verification_status == "warning":
+            # 嘗試從 Verify API 取得語言，僅為返回此固定文案
+            lang = await _fetch_lang_from_verify_api_by_bot(message, verify_group_id, str(verify_code), current_brand)
+            localized = _get_uid_verified_msg_by_lang(lang)
             await message.bot.send_message(
                 chat_id=message.chat.id,
-                text="<b>This UID has already been verified by another user</b>",
+                text=f"<b>{localized}</b>",
                 parse_mode="HTML"
             )
             return
@@ -409,7 +529,8 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                     )
                     return
                 
-                if response.status == 200 and "verification successful" in response_data.get("data", ""):
+                msg_text = _get_api_message_text(response_data)
+                if response.status == 200 and "verification successful" in (msg_text or ""):
                     logger.info(f"[verify_flow] Verification successful, calling DETAIL_API_BY_BOT")
                     detail_payload = {
                         "brand": current_brand,
@@ -494,13 +615,14 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                                 logger.info(f"[verify_flow] Original API response: {response_data['data']}")
                                 logger.info(f"[verify_flow] User full name: {message.from_user.full_name}")
                                 
-                                response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
-                                response_data["data"] = response_data["data"].replace("@{username}", f"@{message.from_user.full_name}")
-                                logger.info(f"[verify_flow] Final message after replacement: {response_data['data']}")
+                                msg_text = (msg_text or "").replace("{Approval Link}", invite_link.invite_link)
+                                msg_text = msg_text.replace("@{username}", f"@{message.from_user.full_name}")
+                                msg_text = msg_text.replace("@{admin}", "@admin")
+                                logger.info(f"[verify_flow] Final message after replacement: {msg_text}")
                                 # 清理HTML标签并发送消息
                                 import re
-                                clean_text = re.sub(r'<[^>]*>', '', response_data["data"])
-                                clean_text = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_text)
+                                clean_text = re.sub(r'<[^>]*>', '', msg_text)
+                                clean_text = re.sub(r'https://[^\s]+', r'<a href=\"\\g<0>\">\\g<0></a>', clean_text)
                                 # 添加鏈接說明（單次可用）
                                 clean_text += "\n\n💡 This invite link is single-use and valid only for you."
                                 await message.bot.send_message(chat_id=message.chat.id, text=clean_text, parse_mode="HTML")
@@ -519,21 +641,23 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                         else:
                             # 如果没有群组信息，只发送验证成功消息
                             logger.warning(f"[verify_flow] No group information available, sending success message only")
-                            response_data["data"] = response_data["data"].replace("@{username}", f"@{message.from_user.full_name}")
+                            msg_text = (msg_text or "").replace("@{username}", f"@{message.from_user.full_name}")
+                            msg_text = msg_text.replace("@{admin}", "@admin")
                             # 清理HTML标签并发送消息
                             import re
-                            clean_text = re.sub(r'<[^>]*>', '', response_data["data"])
+                            clean_text = re.sub(r'<[^>]*>', '', msg_text) 
                             clean_text = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_text)
                             await message.bot.send_message(chat_id=message.chat.id, text=clean_text, parse_mode="HTML")
                     except Exception as e:
                         logger.error(f"[pverify] 生成邀请链接失败: {e}")
                         await message.bot.send_message(chat_id=message.chat.id, text="Verification successful, but an error occurred while generating the invitation link. Please try again later.")
                 else:
-                    error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
+                    error_message = _get_api_message_text(response_data) or "Verification failed. Please check the verification code and try again."
+                    error_message = error_message.replace("@{admin}", "@admin").replace("@{username}", f"@{message.from_user.full_name}")
                     # 清理HTML标签并发送错误消息
                     import re
-                    clean_error = re.sub(r'<[^>]*>', '', error_message)  # 移除所有HTML标签
-                    clean_error = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_error)  # 重新添加链接
+                    clean_error = re.sub(r'<[^>]*>', '', error_message)
+                    clean_error = re.sub(r'https://[^\s]+', r'<a href="\g<0>">\g<0></a>', clean_error)
                     await message.bot.send_message(chat_id=message.chat.id, text=clean_error, parse_mode="HTML")
     except Exception as e:
         logger.error(f"_perform_private_verify_flow error: {e}")
@@ -692,10 +816,16 @@ async def handle_verify_command(message: types.Message):
         # 检查用户是否已验证
         verification_status  = await is_user_verified(user_id, str(chat_id), str(verify_code))
         if verification_status == "warning":
-            # 验证码属于其他用户
+            # 嘗試從 Verify API 取得語言，僅為返回此固定文案
+            try:
+                current_brand_for_lang = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+            except Exception:
+                current_brand_for_lang = DEFAULT_BRAND
+            lang = await _fetch_lang_from_verify_api_group(message, chat_id, str(verify_code), current_brand_for_lang)
+            localized = _get_uid_verified_msg_by_lang(lang)
             await bot.send_message(
                 chat_id=message.chat.id,
-                text="<b>This UID has already been verified</b>",
+                text=f"<b>{localized}</b>",
                 parse_mode="HTML"
             )
             return        
@@ -725,8 +855,9 @@ async def handle_verify_command(message: types.Message):
                 response_data = await response.json()
                 logger.info(f"Verify API Response: {response_data}")
 
-                # 判断返回的状态码和数据内容
-                if response.status == 200 and "verification successful" in response_data.get("data", ""):
+                # 判断返回的状态码和数据内容（兼容 data 字符串與 data.msg）
+                msg_text = _get_api_message_text(response_data)
+                if response.status == 200 and "verification successful" in (msg_text or ""):
                     # 验证成功，生成单人邀请链接
                     info_group_chat_id = None
                     # detail_url = "http://127.0.0.1:5002/admin/telegram/social/detail"
@@ -752,13 +883,14 @@ async def handle_verify_command(message: types.Message):
                         # 添加到数据库
                         await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
 
-                        response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
-                        response_data["data"] = response_data["data"].replace("@{username}", user_mention)
-                        # 以群主替換 @{admin}/{admin}
-                        response_data["data"] = response_data["data"].replace("@{admin}", admin_mention).replace("{admin}", admin_mention)
+                        msg_text = (msg_text or "").replace("{Approval Link}", invite_link.invite_link)
+                        msg_text = msg_text.replace("@{username}", user_mention)
+                        msg_text = msg_text.replace("@{admin}", "@admin")
+                        msg_text = msg_text.replace("@{admin}", admin_mention)
+                        # 移除 @{admin} 替換
                         response_message  = await message.bot.send_message(
                             chat_id=message.chat.id,
-                            text=response_data["data"] + "\n\n💡 This invite link is single-use and valid only for you.",
+                            text=msg_text + "\n\n💡 This invite link is single-use and valid only for you.",
                             parse_mode="HTML"
                         )
                         asyncio.create_task(delete_message_after_delay(message.bot, response_message.chat.id, response_message.message_id, 60))
@@ -771,10 +903,10 @@ async def handle_verify_command(message: types.Message):
                             text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
                         )
                 else:
-                    # 将接口的返回数据直接返回给用户
-                    error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
-                    # 以群主替換 @{admin}/{admin}
-                    error_message = error_message.replace("@{admin}", admin_mention).replace("{admin}", admin_mention)
+                    # 将接口的返回数据直接返回给用户（兼容 data/msg 結構）
+                    error_message = _get_api_message_text(response_data) or "Verification failed. Please check the verification code and try again."
+                    error_message = error_message.replace("@{admin}", admin_mention).replace("@{username}", user_mention)
+                    # 移除 @{admin} 替換
                     await message.bot.send_message(
                         chat_id=message.chat.id,
                         text=error_message,
@@ -815,9 +947,16 @@ async def handle_private_verify_command(message: types.Message):
         # 檢查 UID 是否已被其他人使用
         verification_status = await is_user_verified(user_id, str(verify_group_id), str(verify_code))
         if verification_status == "warning":
+            # 嘗試從 Verify API 取得語言，僅為返回此固定文案
+            try:
+                current_brand_for_lang = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+            except Exception:
+                current_brand_for_lang = DEFAULT_BRAND
+            lang = await _fetch_lang_from_verify_api_by_bot(message, str(verify_group_id), str(verify_code), current_brand_for_lang)
+            localized = _get_uid_verified_msg_by_lang(lang)
             await message.bot.send_message(
                 chat_id=message.chat.id,
-                text="<b>This UID has already been verified</b>",
+                text=f"<b>{localized}</b>",
                 parse_mode="HTML"
             )
             return
@@ -840,7 +979,8 @@ async def handle_private_verify_command(message: types.Message):
                 response_data = await response.json()
                 logger.info(f"[pverify] Verify API Response: {response_data}")
 
-                if response.status == 200 and "verification successful" in response_data.get("data", ""):
+                msg_text = _get_api_message_text(response_data)
+                if response.status == 200 and "verification successful" in (msg_text or ""):
                     detail_payload = {
                         "brand": current_brand,
                         "type": "TELEGRAM",
@@ -867,13 +1007,13 @@ async def handle_private_verify_command(message: types.Message):
 
                         await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
 
-                        response_data["data"] = response_data["data"].replace("{Approval Link}", invite_link.invite_link)
-                        response_data["data"] = response_data["data"].replace("@{username}", user_mention)
+                        msg_text = (msg_text or "").replace("{Approval Link}", invite_link.invite_link)
+                        msg_text = msg_text.replace("@{username}", user_mention)
                         # 移除 @{admin} 替換
 
                         await message.bot.send_message(
                             chat_id=message.chat.id,
-                            text=response_data["data"] + "\n\n💡 This invite link is single-use and valid only for you.",
+                            text=msg_text + "\n\n💡 This invite link is single-use and valid only for you.",
                             parse_mode="HTML"
                         )
                     except Exception as e:
@@ -883,7 +1023,8 @@ async def handle_private_verify_command(message: types.Message):
                             text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
                         )
                 else:
-                    error_message = response_data.get("data", "Verification failed. Please check the verification code and try again.")
+                    error_message = _get_api_message_text(response_data) or "Verification failed. Please check the verification code and try again."
+                    error_message = error_message.replace("@{admin}", "@admin").replace("@{username}", user_mention)
                     # 移除 @{admin} 替換
                     await message.bot.send_message(
                         chat_id=message.chat.id,
