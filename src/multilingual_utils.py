@@ -139,29 +139,53 @@ def _load_templates(lang: str) -> Dict[str, Any]:
 
 async def fetch_language_from_api(user_id: Optional[str] = None, chat_id: Optional[str] = None) -> Optional[str]:
     """
-    透過外部 API 取得語言，回傳值例：'en', 'zh-TW', 'zh-CN'。
-    若失敗或無法取得，回傳 None。
+    透過 DETAIL 相關接口取得語言（優先群組，其次 bot 維度）。
+    回傳值例：'en', 'zh-TW', 'zh-CN'；失敗回 None。
     """
-    if not _LANGUAGE_API_URL:
-        return None
     try:
         import aiohttp
-        params = {}
-        if user_id:
-            params['user_id'] = user_id
-        if chat_id:
-            params['chat_id'] = chat_id
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         timeout = aiohttp.ClientTimeout(total=3)
+
+        # 環境變數
+        DETAIL_API = os.getenv("DETAIL_API")
+        DETAIL_API_BY_BOT = os.getenv("DETAIL_API_BY_BOT")
+        DEFAULT_BRAND = os.getenv("DEFAULT_BRAND", "BYD")
+
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(_LANGUAGE_API_URL, params=params) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                lang = data.get('lang') or data.get('language')
-                if not lang:
-                    return None
-                # 使用統一正規化，支援所有語言與變體（en/zh-CN/zh-TW/ru/id/ja/...）
-                return _normalize_template_lang_code(str(lang))
+            # 1) 若有 chat_id，嘗試群組 detail（依據現有後端，可能不含 lang）
+            if chat_id and DETAIL_API:
+                try:
+                    payload = {"verifyGroup": str(chat_id), "brand": DEFAULT_BRAND, "type": "TELEGRAM"}
+                    async with session.post(DETAIL_API, data=payload, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            # 嘗試 data.lang 或根級 lang
+                            lang = (data.get("data") or {}).get("lang") if isinstance(data.get("data"), dict) else None
+                            if not lang:
+                                lang = data.get("lang")
+                            if lang:
+                                return _normalize_template_lang_code(str(lang))
+                except Exception as e:
+                    logger.debug(f"DETAIL_API lang fetch failed: {e}")
+
+            # 2) bot 維度兜底（DETAIL_API_BY_BOT 通常包含 data.lang）
+            if DETAIL_API_BY_BOT:
+                try:
+                    # 這裡無法取得 botUsername；後端一般以 token 綁定允許缺省
+                    payload = {"brand": DEFAULT_BRAND, "type": "TELEGRAM"}
+                    async with session.post(DETAIL_API_BY_BOT, data=payload, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            lang = (data.get("data") or {}).get("lang") if isinstance(data.get("data"), dict) else None
+                            if not lang:
+                                lang = data.get("lang")
+                            if lang:
+                                return _normalize_template_lang_code(str(lang))
+                except Exception as e:
+                    logger.debug(f"DETAIL_API_BY_BOT lang fetch failed: {e}")
+
+        return None
     except Exception as e:
         logger.warning(f"fetch_language_from_api failed: {e}")
         return None
