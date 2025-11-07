@@ -1803,6 +1803,36 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                     logger.error("Referral link 提取失败，跳过欢迎消息发送")
                     return
 
+                # 清理 HTML：轉義非 HTML 標籤的尖括號（如 <UID>），保留有效的 HTML 標籤
+                def _sanitize_html_for_telegram(text: str) -> str:
+                    """清理 HTML，轉義非標準標籤的尖括號"""
+                    # Telegram 支持的 HTML 標籤列表
+                    valid_tags = ['a', 'b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 
+                                 'code', 'pre', 'blockquote', 'tg-spoiler']
+                    # 先保護有效的 HTML 標籤
+                    import html
+                    # 轉義所有尖括號，然後恢復有效的 HTML 標籤
+                    # 方法：先找到所有有效的 HTML 標籤並臨時替換
+                    tag_placeholders = {}
+                    tag_pattern = r'<(/?)(' + '|'.join(valid_tags) + r')(\s[^>]*)?>'
+                    counter = 0
+                    def replace_valid_tag(match):
+                        nonlocal counter
+                        placeholder = f"__TAG_PLACEHOLDER_{counter}__"
+                        tag_placeholders[placeholder] = match.group(0)
+                        counter += 1
+                        return placeholder
+                    text = re.sub(tag_pattern, replace_valid_tag, text, flags=re.IGNORECASE)
+                    # 轉義剩餘的尖括號
+                    text = html.escape(text)
+                    # 恢復有效的 HTML 標籤
+                    for placeholder, original_tag in tag_placeholders.items():
+                        text = text.replace(placeholder, original_tag)
+                    return text
+
+                # 清理歡迎消息中的 HTML
+                safe_welcome_message = _sanitize_html_for_telegram(welcome_message)
+
                 # 构建按钮
                 # button = InlineKeyboardButton(text="Register Now", url=referral_link)
                 # button_markup = InlineKeyboardMarkup(inline_keyboard=[[button]])  # 确保 inline_keyboard 是二维数组
@@ -1821,7 +1851,7 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                     await bot.send_photo(
                         chat_id=chat_id,
                         photo=image_file,
-                        caption=welcome_message,
+                        caption=safe_welcome_message,
                         parse_mode="HTML",
                         reply_markup=reply_markup,
                     )
