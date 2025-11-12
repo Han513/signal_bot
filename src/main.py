@@ -510,7 +510,10 @@ dp = Dispatcher(storage=MemoryStorage())
 # 停止信号事件
 stop_event = asyncio.Event()
 router = Router()
-bot_manager = BotManager(shared_router=router)
+# 从环境变量读取最大 bot 数量限制，默认 200（如果不需要限制，可以设置为很大的数字，如 1000）
+MAX_BOTS_LIMIT = int(os.getenv("MAX_BOTS_LIMIT", "200"))
+bot_manager = BotManager(shared_router=router, max_bots=MAX_BOTS_LIMIT)
+logger.info(f"BotManager initialized with max_bots limit: {MAX_BOTS_LIMIT}")
 group_chat_ids = set()
 verified_users = {}
 

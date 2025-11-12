@@ -28,7 +28,7 @@ class BotContext:
 class BotManager:
     """簡單的多 Bot 管理器，負責註冊、啟動與停止額外的 Bot。"""
 
-    def __init__(self, shared_router: Router, max_bots: int = 10):
+    def __init__(self, shared_router: Router, max_bots: int = 200):
         self._shared_router = shared_router
         self._max_bots = max_bots
         self._lock = asyncio.Lock()
