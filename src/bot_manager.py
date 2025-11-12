@@ -75,18 +75,18 @@ class BotManager:
                 logger.warning(f"Bot {bot_id} 检测到活跃的 webhook: {webhook_info.url}")
                 return conflict_info
             
-            # 2. 尝试获取 pending updates 数量
+            # 2. 尝试获取 pending updates 数量（使用非常短的超时，避免触发冲突）
+            # 注意：这里不检查冲突，因为 get_updates 本身可能会触发冲突错误
+            # 我们只记录信息，不将其视为冲突
             try:
-                updates = await bot.get_updates(limit=1, timeout=1)
+                updates = await bot.get_updates(limit=1, timeout=0.1)
                 # 如果有很多 pending updates，可能表示 bot 在其他地方运行
                 if len(updates) > 0:
                     logger.info(f"Bot {bot_id} 有 {len(updates)} 个待处理更新")
             except Exception as e:
-                logger.warning(f"Bot {bot_id} 获取更新时出错: {e}")
-                # 这可能是网络问题或 bot 被其他地方占用
-                conflict_info["has_conflict"] = True
-                conflict_info["conflict_type"] = "updates_error"
-                conflict_info["conflict_details"] = f"无法获取更新: {str(e)}"
+                # 不将 get_updates 错误视为冲突，因为这可能是正常的（bot 正在其他地方运行）
+                # 我们会在删除 webhook 后处理这个问题
+                logger.debug(f"Bot {bot_id} 获取更新时出错（这可能是正常的）: {e}")
             
             # 3. 检查 bot 是否响应正常
             try:
@@ -150,22 +150,7 @@ class BotManager:
             bot_name = getattr(me, "first_name", None) or "Unknown"
             username = getattr(me, "username", None)
 
-            # 检测 bot 冲突
-            conflict_info = await self._detect_bot_conflicts(bot, bot_id)
-            
-            # 確保使用輪詢模式：若先前設有 webhook，需刪除
-            try:
-                await bot.delete_webhook(drop_pending_updates=True)
-                logger.info(f"Bot {bot_id} webhook 已清除")
-            except Exception as e:
-                logger.warning(f"delete_webhook failed for bot {bot_id}: {e}")
-                # 如果删除 webhook 失败，记录冲突信息
-                if not conflict_info["has_conflict"]:
-                    conflict_info["has_conflict"] = True
-                    conflict_info["conflict_type"] = "webhook_delete_failed"
-                    conflict_info["conflict_details"] = f"无法删除 webhook: {str(e)}"
-
-            # 如果已存在，關閉臨時 session 並回傳已啟動狀態
+            # 如果已存在，直接返回，避免不必要的操作（如删除 webhook）
             if bot_id in self._contexts:
                 try:
                     await bot.session.close()
@@ -180,7 +165,55 @@ class BotManager:
                 except Exception:
                     existing_bot_name = "Unknown"
                     existing_username = None
+                logger.info(f"Bot {bot_id} 已存在，返回已启动状态")
                 return {"bot_id": bot_id, "status": "already_started", "brand": ctx.brand, "proxy": ctx.proxy, "bot_name": existing_bot_name, "username": existing_username}
+
+            # 检测 bot 冲突（仅在 bot 不存在时检测）
+            conflict_info = await self._detect_bot_conflicts(bot, bot_id)
+            
+            # 確保使用輪詢模式：若先前設有 webhook，需刪除
+            # 实现"抢占"机制：删除 webhook 后等待更长时间，让其他实例的连接超时
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info(f"Bot {bot_id} webhook 已清除")
+                
+                # 等待一段时间，让 Telegram 服务器完全释放连接
+                # 如果其他实例正在运行，它们的连接会在几秒后超时
+                await asyncio.sleep(5)  # 增加到5秒，给其他实例更多时间释放连接
+                
+                # 再次检查 webhook 是否已清除
+                try:
+                    webhook_info = await bot.get_webhook_info()
+                    if webhook_info.url and webhook_info.url.strip():
+                        logger.warning(f"Bot {bot_id} webhook 仍然存在: {webhook_info.url}，再次尝试删除...")
+                        await bot.delete_webhook(drop_pending_updates=True)
+                        await asyncio.sleep(3)  # 再次等待3秒
+                except Exception as check_e:
+                    logger.warning(f"Bot {bot_id} 检查 webhook 状态时出错: {check_e}")
+                
+                # 尝试测试是否可以获取更新（检测是否还有其他实例在运行）
+                try:
+                    # 使用非常短的超时，避免触发冲突
+                    test_updates = await bot.get_updates(limit=1, timeout=0.1, offset=-1)
+                    logger.debug(f"Bot {bot_id} 测试获取更新成功")
+                except Exception as test_e:
+                    error_msg = str(test_e)
+                    if "Conflict" in error_msg or "terminated by other getUpdates" in error_msg:
+                        # 检测到冲突，说明其他实例仍在运行
+                        logger.warning(f"Bot {bot_id} 检测到其他实例正在运行: {error_msg}")
+                        conflict_info["has_conflict"] = True
+                        conflict_info["conflict_type"] = "other_instance_running"
+                        conflict_info["conflict_details"] = f"检测到其他实例正在使用此 bot token: {error_msg}"
+                    else:
+                        # 其他错误，可能是网络问题，不视为冲突
+                        logger.debug(f"Bot {bot_id} 测试获取更新时出错（可能是正常的）: {test_e}")
+            except Exception as e:
+                logger.warning(f"delete_webhook failed for bot {bot_id}: {e}")
+                # 如果删除 webhook 失败，记录冲突信息
+                if not conflict_info["has_conflict"]:
+                    conflict_info["has_conflict"] = True
+                    conflict_info["conflict_type"] = "webhook_delete_failed"
+                    conflict_info["conflict_details"] = f"无法删除 webhook: {str(e)}"
 
             # 為此 Bot 建立獨立 Dispatcher 與其路由
             dp = Dispatcher(storage=MemoryStorage())
@@ -205,6 +238,20 @@ class BotManager:
             if max_idle_seconds is not None:
                 context.tasks.append(asyncio.create_task(self._idle_watchdog(bot_id, max_idle_seconds=max_idle_seconds, check_interval=idle_check_interval)))
 
+            # 如果检测到严重冲突（其他实例正在运行），不启动 bot，返回错误
+            if conflict_info["has_conflict"] and conflict_info["conflict_type"] == "other_instance_running":
+                # 关闭临时 session
+                try:
+                    await bot.session.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                # 抛出异常，让调用方知道有冲突
+                raise RuntimeError(
+                    f"Bot {bot_id} 无法启动：检测到其他实例正在运行。"
+                    f"请确保同一 bot token 只在一个环境中运行。"
+                    f"详情: {conflict_info['conflict_details']}"
+                )
+            
             self._contexts[bot_id] = context
             logger.info(f"Registered and started new bot: {bot_id} ({brand})")
             
@@ -218,8 +265,8 @@ class BotManager:
                 "username": username
             }
             
-            # 如果有冲突，添加冲突信息
-            if conflict_info["has_conflict"]:
+            # 如果有其他类型的冲突（非严重冲突），添加警告信息
+            if conflict_info["has_conflict"] and conflict_info["conflict_type"] != "other_instance_running":
                 result["conflict_warning"] = {
                     "type": conflict_info["conflict_type"],
                     "details": conflict_info["conflict_details"]
@@ -251,5 +298,32 @@ class BotManager:
 
             logger.info(f"Stopped bot: {bot_id}")
             return True
+
+    async def stop_bot_by_token(self, token: str) -> dict:
+        """
+        通过 bot token 停止 bot
+        返回: {"success": bool, "bot_id": int or None, "message": str}
+        """
+        try:
+            # 创建临时 bot 实例来获取 bot_id
+            temp_bot = Bot(token=token)
+            try:
+                me = await temp_bot.get_me()
+                bot_id = me.id
+            finally:
+                try:
+                    await temp_bot.session.close()
+                except Exception:
+                    pass
+            
+            # 使用 bot_id 停止 bot（stop_bot 内部已经有锁保护）
+            stopped = await self.stop_bot(bot_id)
+            if stopped:
+                return {"success": True, "bot_id": bot_id, "message": f"Bot {bot_id} stopped successfully"}
+            else:
+                return {"success": False, "bot_id": bot_id, "message": f"Bot {bot_id} not found"}
+        except Exception as e:
+            logger.error(f"Failed to stop bot by token: {e}")
+            return {"success": False, "bot_id": None, "message": f"Failed to stop bot: {str(e)}"}
 
 

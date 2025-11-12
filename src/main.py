@@ -269,6 +269,8 @@ def _replace_placeholders(raw_text: str, *, link: Optional[str], user_mention: s
     if not isinstance(raw_text, str):
         return ""
     import re
+    # 先移除不可見字符（但保留RTL控制字符，因為它們對阿拉伯文等RTL語言很重要）
+    # 只移除可能造成問題的雙向文本控制字符，保留RTL方向控制
     text = _strip_invisible(raw_text)
     # username/admin
     if user_mention:
@@ -281,6 +283,8 @@ def _replace_placeholders(raw_text: str, *, link: Optional[str], user_mention: s
         # 無連結時移除佔位符，避免裸露
         text = re.sub(r"\{\s*Approval\s+Link\s*\}", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s{2,}", " ", text)
+    # 替換後應用RTL處理，確保阿拉伯文等RTL語言正確顯示
+    text = apply_rtl_if_needed(text)
     return text
 
 # -------------------- 語言解析/兜底 --------------------
@@ -302,7 +306,7 @@ def _lang_from_welcome_response(resp_obj: dict) -> Optional[str]:
 
 async def _resolve_lang_for_user(bot: Bot, user_id: str, chat_id: str, current_brand: str) -> str:
     """統一解析語言：先用快取 -> detail_by_bot -> 英文。"""
-    lang = _USER_LANG_PREF.get(str(user_id))
+    lang = _get_user_lang(str(user_id))
     if not lang:
         try:
             lang = await _fetch_lang_from_detail_by_bot(bot, current_brand)
@@ -335,7 +339,69 @@ _VERIFY_FAILED_MESSAGES = {
 
 def _get_localized_verify_failed_msg(lang: Optional[str]) -> str:
     key = _coalesce_lang_for_templates(lang or "en")
-    return _VERIFY_FAILED_MESSAGES.get(key, _VERIFY_FAILED_MESSAGES["en"]) 
+    return _VERIFY_FAILED_MESSAGES.get(key, _VERIFY_FAILED_MESSAGES["en"])
+
+# -------------------- 多語言：無法生成邀請鏈接提示 --------------------
+_INVITE_LINK_ERROR_MESSAGES = {
+    "en": "Note: Unable to generate invitation link at this time. Please contact support for group access.",
+    "zh-TW": "注意：目前無法生成邀請連結。請聯繫客服以獲取群組訪問權限。",
+    "zh-CN": "注意：目前无法生成邀请链接。请联系客服以获取群组访问权限。",
+    "ja": "注意：現在招待リンクを生成できません。グループアクセスについてはサポートにお問い合わせください。",
+    "ko": "참고: 현재 초대 링크를 생성할 수 없습니다. 그룹 액세스는 지원팀에 문의하세요.",
+    "ru": "Примечание: В настоящее время невозможно создать пригласительную ссылку. Пожалуйста, свяжитесь со службой поддержки для доступа к группе.",
+    "es": "Nota: No se puede generar el enlace de invitación en este momento. Por favor, contacte con soporte para acceder al grupo.",
+    "pt": "Nota: Não é possível gerar o link de convite no momento. Entre em contato com o suporte para acessar o grupo.",
+    "fr": "Note : Impossible de générer le lien d'invitation pour le moment. Veuillez contacter le support pour accéder au groupe.",
+    "de": "Hinweis: Der Einladungslink kann derzeit nicht generiert werden. Bitte kontaktieren Sie den Support für Gruppenzugriff.",
+    "id": "Catatan: Tidak dapat menghasilkan tautan undangan saat ini. Silakan hubungi dukungan untuk akses grup.",
+    "vi": "Lưu ý: Không thể tạo liên kết mời tại thời điểm này. Vui lòng liên hệ hỗ trợ để truy cập nhóm.",
+    "th": "หมายเหตุ: ไม่สามารถสร้างลิงก์เชิญได้ในขณะนี้ กรุณาติดต่อฝ่ายสนับสนุนเพื่อเข้าถึงกลุ่ม",
+    "tr": "Not: Şu anda davet bağlantısı oluşturulamıyor. Grup erişimi için lütfen destek ile iletişime geçin.",
+    "it": "Nota: Impossibile generare il link di invito al momento. Contattare il supporto per l'accesso al gruppo.",
+    "ar": "ملاحظة: لا يمكن إنشاء رابط الدعوة في الوقت الحالي. يرجى الاتصال بالدعم للوصول إلى المجموعة.",
+    "fa": "توجه: در حال حاضر نمی‌توان لینک دعوت ایجاد کرد. لطفاً برای دسترسی به گروه با پشتیبانی تماس بگیرید.",
+    "tl": "Tandaan: Hindi makakagawa ng invitation link sa ngayon. Mangyaring makipag-ugnayan sa suporta para sa pag-access sa grupo.",
+    "da": "Bemærk: Kan ikke generere invitationslink lige nu. Kontakt venligst support for gruppeadgang.",
+    "pl": "Uwaga: Nie można wygenerować linku zaproszenia w tym momencie. Skontaktuj się z pomocą techniczną, aby uzyskać dostęp do grupy.",
+}
+
+def _get_localized_invite_link_error_msg(lang: Optional[str]) -> str:
+    """獲取本地化的無法生成邀請鏈接提示消息"""
+    key = _coalesce_lang_for_templates(lang or "en")
+    return _INVITE_LINK_ERROR_MESSAGES.get(key, _INVITE_LINK_ERROR_MESSAGES["en"])
+
+# -------------------- 多語言：請提供驗證碼提示 --------------------
+_VERIFY_CODE_PROMPT_MESSAGES = {
+    "en": "Please provide verification code, for example: /verify 123456",
+    "zh-TW": "請提供驗證的 UID, 例如: /verify 123456",
+    "zh-CN": "請提供驗證的 UID, 例如: /verify 123456",
+    "ru": "Пожалуйста, введите код подтверждения, например: /verify 123456",
+    "id": "Harap berikan kode verifikasi, contohnya: /verify 123456",
+    "ja": "認証コードを入力してください。例: /verify 123456",
+    "pt": "Por favor, forneça o código de verificação, por exemplo: /verify 123456",
+    "fr": "Veuillez fournir le code de vérification, par exemple: /verify 123456",
+    "es": "Por favor, proporciona el código de verificación, por ejemplo: /verify 123456",
+    "tr": "Lütfen doğrulama kodunu sağlayın, örneğin: /verify 123456",
+    "de": "Bitte geben Sie den Bestätigungscode ein, z. B.: /verify 123456",
+    "it": "Si prega di provvedere il codice di verifica, ad esempio: /verify 123456",
+    "ar": " /verify 123456 : من فضلك أدخل رمز التحقق. مثلاً",
+    "fa": "لطفا کد تایید را وارد کنید، مثال: /verify 123456",
+    "vi": "Vui lòng cung cấp mã xác minh, ví dụ: /verify 123456",
+    "tl": "Paki-provide ang verification code, halimbawa: /verify 123456",
+    "th": "กรุณาใส่รหัสยืนยัน เช่น /verify 123456",
+    "da": "Angiv venligst bekræftelseskoden, f.eks.: /verify 123456",
+    "pl": "Podaj kod weryfikacyjny, na przykład: /verify 123456",
+    "ko": "인증 코드를 입력해 주세요. 예: /verify 123456",
+}
+
+def _get_localized_verify_code_prompt(lang: Optional[str]) -> str:
+    """獲取本地化的驗證碼提示消息"""
+    key = _coalesce_lang_for_templates(lang or "en")
+    msg = _VERIFY_CODE_PROMPT_MESSAGES.get(key, _VERIFY_CODE_PROMPT_MESSAGES["en"])
+    # 如果該語言為空，回退到英文
+    if not msg:
+        return _VERIFY_CODE_PROMPT_MESSAGES["en"]
+    return msg 
 def _get_api_message_text(resp: dict) -> str:
     """從接口返回中提取可展示的文本。
     支援兩種格式：
@@ -456,9 +522,47 @@ _PENDING_VERIFY_GID = {}
 _BOT_NAME_CACHE = {}
 
 # 用戶語言偏好（在 /start 時記錄）
+# 結構：{user_id: {"lang": "zh-TW", "ts": 1234567890.0}}
 _USER_LANG_PREF: dict = {}
 # 群語言偏好（在群驗證歡迎語時記錄）
+# 結構：{chat_id: {"lang": "zh-TW", "ts": 1234567890.0}}
 _GROUP_LANG_PREF: dict = {}
+# 語言緩存TTL（秒）
+_LANG_CACHE_TTL_SECONDS = 20 * 60  # 20分鐘
+
+def _get_user_lang(user_id: str) -> Optional[str]:
+    """獲取用戶語言緩存，如果過期則返回None"""
+    item = _USER_LANG_PREF.get(str(user_id))
+    if not item:
+        return None
+    import time
+    if time.time() - item.get("ts", 0) > _LANG_CACHE_TTL_SECONDS:
+        # 過期，移除緩存
+        _USER_LANG_PREF.pop(str(user_id), None)
+        return None
+    return item.get("lang")
+
+def _set_user_lang(user_id: str, lang: str) -> None:
+    """設置用戶語言緩存，包含時間戳"""
+    import time
+    _USER_LANG_PREF[str(user_id)] = {"lang": str(lang), "ts": time.time()}
+
+def _get_group_lang(chat_id: str) -> Optional[str]:
+    """獲取群組語言緩存，如果過期則返回None"""
+    item = _GROUP_LANG_PREF.get(str(chat_id))
+    if not item:
+        return None
+    import time
+    if time.time() - item.get("ts", 0) > _LANG_CACHE_TTL_SECONDS:
+        # 過期，移除緩存
+        _GROUP_LANG_PREF.pop(str(chat_id), None)
+        return None
+    return item.get("lang")
+
+def _set_group_lang(chat_id: str, lang: str) -> None:
+    """設置群組語言緩存，包含時間戳"""
+    import time
+    _GROUP_LANG_PREF[str(chat_id)] = {"lang": str(lang), "ts": time.time()}
 
 async def get_bot_display_name(bot: Bot) -> str:
     """取得 Bot 顯示名稱（@username 或 first_name），帶快取以降低 API 次數。"""
@@ -603,7 +707,7 @@ async def handle_inline_callbacks(callback: types.CallbackQuery):
                 # 強兜底優先：detail_by_bot（以群配置為準）
                 lang_hint = await _fetch_lang_from_detail_by_bot(callback.bot, current_brand)
                 if not lang_hint:
-                    lang_hint = _USER_LANG_PREF.get(str(callback.from_user.id))
+                    lang_hint = _get_user_lang(str(callback.from_user.id))
                 if not lang_hint:
                     # 最後再回退 get_preferred_language（若配置了語言API）
                     try:
@@ -723,7 +827,7 @@ async def _generate_invite_link_for_verified_user(message: types.Message, verify
                         except Exception:
                             lang_hint = None
                         if not lang_hint:
-                            lang_hint = _USER_LANG_PREF.get(str(message.from_user.id))
+                            lang_hint = _get_user_lang(str(message.from_user.id))
                         if not lang_hint:
                             try:
                                 lang_hint = await _fetch_lang_from_detail_by_bot(message.bot, current_brand)
@@ -731,9 +835,11 @@ async def _generate_invite_link_for_verified_user(message: types.Message, verify
                                 lang_hint = None
                         lang_key = _coalesce_lang_for_templates(lang_hint or "en")
                         tpl = _WELCOME_BACK_TEMPLATES.get(lang_key, _WELCOME_BACK_TEMPLATES["en"])
-                        success_message = tpl.format(name=message.from_user.full_name, link=invite_link.invite_link)
+                        # 将 {name} 替换为HTML格式的用户链接，使其可点击
+                        user_mention_html = f'<a href="tg://user?id={message.from_user.id}">{message.from_user.full_name}</a>'
+                        success_message = tpl.format(name=user_mention_html, link=invite_link.invite_link)
                         success_message = apply_rtl_if_needed(success_message)
-                        await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode=None)
+                        await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode="HTML")
                         
                     except Exception as invite_error:
                         logger.error(f"[verified_user] Failed to create invite link: {invite_error}")
@@ -773,31 +879,7 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
         user_id = str(message.from_user.id)
         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
 
-        # 检查用户是否已验证（全局UID检查，无论是否有verify_group_id）
-        verification_status = await is_user_verified(user_id, str(verify_group_id) if verify_group_id else "", str(verify_code))
-        if verification_status == "warning":
-            # 嘗試從 Verify API 取得語言，僅為返回此固定文案
-            lang = await _fetch_lang_from_verify_api_by_bot(message, verify_group_id, str(verify_code), current_brand)
-            localized = _get_uid_verified_msg_by_lang(lang)
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text=f"<b>{localized}</b>",
-                parse_mode="HTML"
-            )
-            return
-        elif verification_status == "verified":
-            # 用户已验证过，直接生成新的邀请链接
-            logger.info(f"[verify_flow] User {user_id} already verified, generating new invite link")
-            await _generate_invite_link_for_verified_user(message, verify_group_id, current_brand)
-            return
-        elif verification_status == "error":
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text="⚠️ Verification service is temporarily unavailable. Please try again later or contact the administrator.",
-                parse_mode=None
-            )
-            return
-
+        # 统一走验证接口，由后端判断是否已验证
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         admin_mention = "admin"
         bot_name_for_api = await get_bot_display_name(message.bot)
@@ -832,6 +914,7 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                     return
                 
                 msg_text = _get_api_message_text(response_data)
+                logger.info(f"[verify_flow] Original API message text (before replacement): {msg_text!r}")
                 # 成功判斷：200 且包含英文成功詞或帶有 {Approval Link} 佔位（多語成功必帶）
                 import re as _re
                 _msg_lower = (msg_text or "").lower()
@@ -858,6 +941,11 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                         if isinstance(detail_data.get("data"), dict):
                             verify_group_chat_id = detail_data.get("data", {}).get("verifyGroup")
                             info_group_chat_id = detail_data.get("data", {}).get("socialGroup")
+                            # 从 detail API 响应中提取语言并更新缓存
+                            lang_from_detail = detail_data.get("data", {}).get("lang")
+                            if lang_from_detail:
+                                _set_user_lang(str(message.from_user.id), str(lang_from_detail))
+                                logger.info(f"[verify_flow] Updated user lang cache from detail API: uid={message.from_user.id} lang={lang_from_detail}")
                         else:
                             # 如果data是字符串，尝试从其他地方获取群组信息
                             logger.warning(f"[verify_flow] Detail API returned string data: {detail_data.get('data')}")
@@ -916,9 +1004,7 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                                 )
                                 logger.info(f"[verify_flow] Successfully created invite link: {invite_link.invite_link}")
                                 
-                                logger.info(f"[verify_flow] Calling add_verified_user with: user_id={user_id}, verify_group_chat_id={verify_group_chat_id}, info_group_chat_id={info_group_chat_id}, verify_code={verify_code} (type: {type(verify_code)})")
-                                await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
-                                
+                                # 验证记录由后端管理，不需要前端保存到数据库
                                 logger.info(f"[verify_flow] Original API response: {response_data['data']}")
                                 logger.info(f"[verify_flow] User full name: {message.from_user.full_name}")
                                 
@@ -928,20 +1014,50 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                                     user_mention=f"@{message.from_user.full_name}",
                                     admin_mention="@admin",
                                 )
-                                logger.info(f"[verify_flow] Final message after replacement: {msg_text}")
+                                logger.info(f"[verify_flow] Final message after replacement: {msg_text!r}")
+                                logger.info(f"[verify_flow] Final message length: {len(msg_text)}")
                                 await message.bot.send_message(chat_id=message.chat.id, text=msg_text, parse_mode="HTML")
                             except Exception as invite_error:
                                 logger.error(f"[verify_flow] Failed to create invite link: {invite_error}")
-                                # 即使无法创建邀请链接，仍然保存验证记录
-                                try:
-                                    logger.info(f"[verify_flow] Saving verification record without invite link")
-                                    await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
-                                except Exception as save_error:
-                                    logger.error(f"[verify_flow] Failed to save verification record: {save_error}")
+                                # 验证记录由后端管理，不需要前端保存到数据库
                                 
-                                # 发送验证成功消息，但不包含邀请链接
-                                success_message = f"✅ Verification successful!\n\n{message.from_user.full_name}, your account has been verified.\n\nNote: Unable to generate invitation link at this time. Please contact support for group access."
-                                await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode=None)
+                                # 使用后端返回的消息，但替换 {Approval Link} 为本地化的错误提示
+                                import re
+                                # 获取语言提示
+                                lang_hint = None
+                                try:
+                                    if isinstance(detail_data.get("data"), dict):
+                                        lang_hint = detail_data.get("data", {}).get("lang")
+                                except Exception:
+                                    pass
+                                if not lang_hint:
+                                    lang_hint = _get_user_lang(str(message.from_user.id))
+                                
+                                # 获取本地化的错误提示
+                                error_note = _get_localized_invite_link_error_msg(lang_hint)
+                                
+                                # 替换 {Approval Link} 为错误提示
+                                success_message = re.sub(
+                                    r"\{\s*Approval\s+Link\s*\}", 
+                                    f"\n\n{error_note}", 
+                                    msg_text or "", 
+                                    flags=re.IGNORECASE
+                                )
+                                
+                                # 如果消息中没有 {Approval Link}，则在末尾添加错误提示
+                                if not re.search(r"\{\s*Approval\s+Link\s*\}", msg_text or "", re.IGNORECASE):
+                                    success_message = (msg_text or "") + f"\n\n{error_note}"
+                                
+                                # 替换用户名占位符
+                                success_message = success_message.replace("@{username}", f"@{message.from_user.full_name}")
+                                success_message = _replace_placeholders(
+                                    success_message,
+                                    link=None,
+                                    user_mention=f'<a href="tg://user?id={message.from_user.id}">{message.from_user.full_name}</a>',
+                                    admin_mention="@admin",
+                                )
+                                success_message = apply_rtl_if_needed(success_message)
+                                await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode="HTML")
                         else:
                             # 如果没有群组信息，只发送验证成功消息
                             logger.warning(f"[verify_flow] No group information available, sending success message only")
@@ -954,7 +1070,43 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                             await message.bot.send_message(chat_id=message.chat.id, text=msg_text, parse_mode="HTML")
                     except Exception as e:
                         logger.error(f"[pverify] 生成邀请链接失败: {e}")
-                        await message.bot.send_message(chat_id=message.chat.id, text="Verification successful, but an error occurred while generating the invitation link. Please try again later.")
+                        # 使用后端返回的消息，但替换 {Approval Link} 为本地化的错误提示
+                        import re
+                        # 获取语言提示
+                        lang_hint = None
+                        try:
+                            if isinstance(detail_data.get("data"), dict):
+                                lang_hint = detail_data.get("data", {}).get("lang")
+                        except Exception:
+                            pass
+                        if not lang_hint:
+                            lang_hint = _get_user_lang(str(message.from_user.id))
+                        
+                        # 获取本地化的错误提示
+                        error_note = _get_localized_invite_link_error_msg(lang_hint)
+                        
+                        # 替换 {Approval Link} 为错误提示
+                        success_message = re.sub(
+                            r"\{\s*Approval\s+Link\s*\}", 
+                            f"\n\n{error_note}", 
+                            msg_text or "", 
+                            flags=re.IGNORECASE
+                        )
+                        
+                        # 如果消息中没有 {Approval Link}，则在末尾添加错误提示
+                        if not re.search(r"\{\s*Approval\s+Link\s*\}", msg_text or "", re.IGNORECASE):
+                            success_message = (msg_text or "") + f"\n\n{error_note}"
+                        
+                        # 替换用户名占位符
+                        success_message = success_message.replace("@{username}", f"@{message.from_user.full_name}")
+                        success_message = _replace_placeholders(
+                            success_message,
+                            link=None,
+                            user_mention=f'<a href="tg://user?id={message.from_user.id}">{message.from_user.full_name}</a>',
+                            admin_mention="@admin",
+                        )
+                        success_message = apply_rtl_if_needed(success_message)
+                        await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode="HTML")
                 else:
                     error_message = _get_api_message_text(response_data)
                     if not error_message:
@@ -1105,46 +1257,79 @@ async def handle_verify_command(message: types.Message):
             bot_manager.record_activity(message.bot.id)
         except Exception:
             pass
-        # 尝试删除用户的消息以防止泄露
-        # try:
-        #     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-        # except Exception as e:
-        #     logger.error(f"无法删除用户消息: {e}")
-
+        
         # 分割指令以提取验证码
         command_parts = message.text.split()
         if len(command_parts) < 2:
+            # 获取语言并显示本地化的提示消息
+            current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+            lang_hint = None
+            
+            # 如果是群聊，尝试获取群组语言
+            if message.chat.type != "private":
+                # 先尝试从缓存获取
+                lang_hint = _get_group_lang(str(message.chat.id))
+                # 如果缓存没有，尝试从 detail API 获取
+                if not lang_hint:
+                    try:
+                        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+                        detail_payload = {"verifyGroup": str(message.chat.id), "brand": current_brand, "type": "TELEGRAM"}
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(DETAIL_API, headers=headers, data=detail_payload) as detail_response:
+                                if detail_response.status == 200:
+                                    detail_data = await detail_response.json()
+                                    if isinstance(detail_data.get("data"), dict):
+                                        lang_hint = detail_data.get("data", {}).get("lang")
+                                    if not lang_hint:
+                                        lang_hint = detail_data.get("lang")
+                                    # 缓存群组语言
+                                    if lang_hint:
+                                        _set_group_lang(str(message.chat.id), str(lang_hint))
+                    except Exception as e:
+                        logger.warning(f"[verify] Failed to fetch group lang: {e}")
+            
+            # 如果是私聊，尝试从用户语言偏好或 bot detail 获取
+            else:
+                lang_hint = _get_user_lang(str(message.from_user.id))
+                if not lang_hint:
+                    try:
+                        lang_hint = await _fetch_lang_from_detail_by_bot(message.bot, current_brand)
+                    except Exception:
+                        lang_hint = None
+            
+            # 获取本地化的提示消息
+            prompt_msg = _get_localized_verify_code_prompt(lang_hint)
+            prompt_msg = apply_rtl_if_needed(prompt_msg)
             await message.bot.send_message(
                 chat_id=message.chat.id,
-                text="Please provide verification code, for example: /verify 123456"
+                text=prompt_msg,
+                parse_mode=None
             )
             return
 
         verify_code = command_parts[1]
-        chat_id = message.chat.id  # 当前群组 ID
         current_brand = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
+        
+        # 防呆：如果是私聊，统一走私聊验证流程（VERIFY_API_BY_BOT）
+        if message.chat.type == "private":
+            logger.info(f"[verify] 检测到私聊验证请求，使用 VERIFY_API_BY_BOT 接口")
+            # 获取 verify_group_id（如果有的话，从 pending 状态或从 /start 时获取）
+            verify_group_id = _PENDING_VERIFY_GID.get(str(message.from_user.id))
+            # 调用私聊验证流程
+            await _perform_private_verify_flow(message, verify_group_id, verify_code, current_brand)
+            # 清除 pending 状态
+            if str(message.from_user.id) in _PENDING_VERIFY_GID:
+                _PENDING_VERIFY_GID.pop(str(message.from_user.id), None)
+            return
+
+        # 群聊验证流程（使用 VERIFY_API）
+        chat_id = message.chat.id  # 当前群组 ID
 
         # 使用 user_id 标记用户
         user_id = str(message.from_user.id)
         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
 
-        # 检查用户是否已验证
-        verification_status  = await is_user_verified(user_id, str(chat_id), str(verify_code))
-        if verification_status == "warning":
-            # 嘗試從 Verify API 取得語言，僅為返回此固定文案
-            try:
-                current_brand_for_lang = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
-            except Exception:
-                current_brand_for_lang = DEFAULT_BRAND
-            lang = await _fetch_lang_from_verify_api_group(message, chat_id, str(verify_code), current_brand_for_lang)
-            localized = _get_uid_verified_msg_by_lang(lang)
-            await bot.send_message(
-                chat_id=message.chat.id,
-                text=f"<b>{localized}</b>",
-                parse_mode="HTML"
-            )
-            return        
-
+        # 统一走验证接口，由后端判断是否已验证
         # 获取当前群组的 owner 信息
         try:
             admins = await message.bot.get_chat_administrators(chat_id)
@@ -1187,6 +1372,12 @@ async def handle_verify_command(message: types.Message):
                         detail_data = await detail_response.json()
                         verify_group_chat_id = detail_data.get("data").get("verifyGroup")  # 替换为你的资讯群 ID
                         info_group_chat_id = detail_data.get("data").get("socialGroup")  # 替换为你的资讯群 ID
+                        # 从 detail API 响应中提取语言并更新群组语言缓存
+                        if isinstance(detail_data.get("data"), dict):
+                            lang_from_detail = detail_data.get("data", {}).get("lang")
+                            if lang_from_detail:
+                                _set_group_lang(str(chat_id), str(lang_from_detail))
+                                logger.info(f"[verify_group] Updated group lang cache from detail API: gid={chat_id} lang={lang_from_detail}")
                     try:
                         # 确保chat_id是整数类型
                         chat_id_int = int(info_group_chat_id) if info_group_chat_id else None
@@ -1199,9 +1390,7 @@ async def handle_verify_command(message: types.Message):
                             member_limit=1,  # 單次可用
                         )
 
-                        # 添加到数据库
-                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
-
+                        # 验证记录由后端管理，不需要前端保存到数据库
                         msg_text = _replace_placeholders(
                             msg_text or "",
                             link=invite_link.invite_link,
@@ -1219,10 +1408,45 @@ async def handle_verify_command(message: types.Message):
 
                     except Exception as e:
                         logger.error(f"生成邀请链接失败: {e}")
-                        await message.bot.send_message(
-                            chat_id=message.chat.id,
-                            text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
+                        # 使用后端返回的消息，但替换 {Approval Link} 为本地化的错误提示
+                        import re
+                        # 获取语言提示
+                        lang_hint = None
+                        try:
+                            if isinstance(detail_data.get("data"), dict):
+                                lang_hint = detail_data.get("data", {}).get("lang")
+                        except Exception:
+                            pass
+                        if not lang_hint:
+                            lang_hint = _get_group_lang(str(message.chat.id))
+                        if not lang_hint:
+                            lang_hint = _get_user_lang(str(message.from_user.id))
+                        
+                        # 获取本地化的错误提示
+                        error_note = _get_localized_invite_link_error_msg(lang_hint)
+                        
+                        # 替换 {Approval Link} 为错误提示
+                        success_message = re.sub(
+                            r"\{\s*Approval\s+Link\s*\}", 
+                            f"\n\n{error_note}", 
+                            msg_text or "", 
+                            flags=re.IGNORECASE
                         )
+                        
+                        # 如果消息中没有 {Approval Link}，则在末尾添加错误提示
+                        if not re.search(r"\{\s*Approval\s+Link\s*\}", msg_text or "", re.IGNORECASE):
+                            success_message = (msg_text or "") + f"\n\n{error_note}"
+                        
+                        # 替换用户名占位符
+                        success_message = success_message.replace("@{username}", user_mention)
+                        success_message = _replace_placeholders(
+                            success_message,
+                            link=None,
+                            user_mention=user_mention,
+                            admin_mention=admin_mention or "@admin",
+                        )
+                        success_message = apply_rtl_if_needed(success_message)
+                        await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode="HTML")
                 else:
                     # 将接口的返回数据直接返回给用户（兼容 data/msg 結構）；若無則本地多語兜底
                     error_message = _get_api_message_text(response_data)
@@ -1233,9 +1457,9 @@ async def handle_verify_command(message: types.Message):
                             lang_hint = None
                         if not lang_hint:
                             # 先用群語言緩存
-                            lang_hint = _GROUP_LANG_PREF.get(str(message.chat.id))
+                            lang_hint = _get_group_lang(str(message.chat.id))
                         if not lang_hint:
-                            lang_hint = _USER_LANG_PREF.get(str(message.from_user.id))
+                            lang_hint = _get_user_lang(str(message.from_user.id))
                         if not lang_hint:
                             try:
                                 lang_hint = await get_preferred_language(str(message.from_user.id), str(message.chat.id))
@@ -1286,23 +1510,7 @@ async def handle_private_verify_command(message: types.Message):
         user_id = str(message.from_user.id)
         user_mention = f'<a href="tg://user?id={user_id}">{message.from_user.full_name}</a>'
 
-        # 檢查 UID 是否已被其他人使用
-        verification_status = await is_user_verified(user_id, str(verify_group_id), str(verify_code))
-        if verification_status == "warning":
-            # 嘗試從 Verify API 取得語言，僅為返回此固定文案
-            try:
-                current_brand_for_lang = bot_manager.get_brand_by_bot_id(message.bot.id, DEFAULT_BRAND)
-            except Exception:
-                current_brand_for_lang = DEFAULT_BRAND
-            lang = await _fetch_lang_from_verify_api_by_bot(message, str(verify_group_id), str(verify_code), current_brand_for_lang)
-            localized = _get_uid_verified_msg_by_lang(lang)
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text=f"<b>{localized}</b>",
-                parse_mode="HTML"
-            )
-            return
-
+        # 统一走验证接口，由后端判断是否已验证
         admin_mention = "@admin"  # 私聊情境無法取得群擁有者
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -1338,6 +1546,12 @@ async def handle_private_verify_command(message: types.Message):
                         detail_data = await detail_response.json()
                         verify_group_chat_id = detail_data.get("data").get("verifyGroup")
                         info_group_chat_id = detail_data.get("data").get("socialGroup")
+                        # 从 detail API 响应中提取语言并更新用户语言缓存
+                        if isinstance(detail_data.get("data"), dict):
+                            lang_from_detail = detail_data.get("data", {}).get("lang")
+                            if lang_from_detail:
+                                _set_user_lang(str(message.from_user.id), str(lang_from_detail))
+                                logger.info(f"[pverify] Updated user lang cache from detail API: uid={message.from_user.id} lang={lang_from_detail}")
 
                     try:
                         # 确保chat_id是整数类型
@@ -1351,8 +1565,7 @@ async def handle_private_verify_command(message: types.Message):
                             member_limit=1,  # 單次可用
                         )
 
-                        await add_verified_user(user_id, str(verify_group_chat_id), str(info_group_chat_id), int(verify_code))
-
+                        # 验证记录由后端管理，不需要前端保存到数据库
                         msg_text = _replace_placeholders(
                             msg_text or "",
                             link=invite_link.invite_link,
@@ -1368,10 +1581,43 @@ async def handle_private_verify_command(message: types.Message):
                         )
                     except Exception as e:
                         logger.error(f"[pverify] 生成邀请链接失败: {e}")
-                        await message.bot.send_message(
-                            chat_id=message.chat.id,
-                            text="Verification successful, but an error occurred while generating the invitation link. Please try again later."
+                        # 使用后端返回的消息，但替换 {Approval Link} 为本地化的错误提示
+                        import re
+                        # 获取语言提示
+                        lang_hint = None
+                        try:
+                            if isinstance(response_data.get("data"), dict):
+                                lang_hint = response_data.get("data", {}).get("lang")
+                        except Exception:
+                            pass
+                        if not lang_hint:
+                            lang_hint = _get_user_lang(str(message.from_user.id))
+                        
+                        # 获取本地化的错误提示
+                        error_note = _get_localized_invite_link_error_msg(lang_hint)
+                        
+                        # 替换 {Approval Link} 为错误提示
+                        success_message = re.sub(
+                            r"\{\s*Approval\s+Link\s*\}", 
+                            f"\n\n{error_note}", 
+                            msg_text or "", 
+                            flags=re.IGNORECASE
                         )
+                        
+                        # 如果消息中没有 {Approval Link}，则在末尾添加错误提示
+                        if not re.search(r"\{\s*Approval\s+Link\s*\}", msg_text or "", re.IGNORECASE):
+                            success_message = (msg_text or "") + f"\n\n{error_note}"
+                        
+                        # 替换用户名占位符
+                        success_message = success_message.replace("@{username}", user_mention)
+                        success_message = _replace_placeholders(
+                            success_message,
+                            link=None,
+                            user_mention=user_mention,
+                            admin_mention="@admin",
+                        )
+                        success_message = apply_rtl_if_needed(success_message)
+                        await message.bot.send_message(chat_id=message.chat.id, text=success_message, parse_mode="HTML")
                 else:
                     error_message = _get_api_message_text(response_data)
                     if not error_message:
@@ -1482,7 +1728,7 @@ async def handle_start(message: types.Message):
                                 except Exception:
                                     lang_hint = None
                             if lang_hint:
-                                _USER_LANG_PREF[str(message.from_user.id)] = lang_hint
+                                _set_user_lang(str(message.from_user.id), lang_hint)
                                 logger.info(f"[start] cached user lang: uid={message.from_user.id} lang={lang_hint}")
                             logger.info(f"[start] 成功获取欢迎语，verifyGroup: {chosen_verify_group}")
                     else:
@@ -1762,7 +2008,7 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                                     welcome_message = data_obj.get("msg") or ""
                                     lang_hint = data_obj.get("lang") or resp_json.get("lang")
                                     if lang_hint:
-                                        _GROUP_LANG_PREF[str(chat_id)] = str(lang_hint)
+                                        _set_group_lang(str(chat_id), str(lang_hint))
                                         logger.info(f"[group_welcome] cached group lang: gid={chat_id} lang={lang_hint}")
                                 else:
                                     # 字串格式
@@ -2275,7 +2521,27 @@ async def start_aiohttp_server(bot: Bot, manager: BotManager):
             except Exception as e:
                 logger.error(f"persist agent failed: {e}")
 
-            return web.json_response({"status": "success", **result})
+            # 如果 result 中有 status 字段，使用它；否则使用 "success"
+            response_status = result.get("status", "success")
+            # 如果 result 中的 status 是 "already_started"，HTTP 响应仍返回 "success"
+            # 但保留 result 中的 status 信息
+            if response_status == "already_started":
+                return web.json_response({"status": "success", **result})
+            else:
+                return web.json_response({"status": response_status, **result})
+        except RuntimeError as e:
+            # 处理冲突错误（其他实例正在运行）
+            error_msg = str(e)
+            if "其他实例正在运行" in error_msg or "other instance" in error_msg.lower():
+                logger.warning(f"Bot registration conflict: {error_msg}")
+                return web.json_response({
+                    "status": "error",
+                    "error_type": "conflict",
+                    "message": error_msg
+                }, status=409)  # 409 Conflict
+            else:
+                logger.error(f"register bot failed: {e}")
+                return web.json_response({"status": "error", "message": str(e)}, status=500)
         except Exception as e:
             logger.error(f"register bot failed: {e}")
             return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -2299,9 +2565,40 @@ async def start_aiohttp_server(bot: Bot, manager: BotManager):
         except Exception as e:
             return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+    async def handle_stop_bot_by_token(request: web.Request):
+        """通过 bot token 停止 bot"""
+        await _require_auth(request)
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"status": "error", "message": "Invalid JSON"}, status=400)
+        
+        token = payload.get("token") or payload.get("bot_key")
+        if not token:
+            return web.json_response({"status": "error", "message": "Missing token or bot_key"}, status=400)
+        
+        try:
+            result = await manager.stop_bot_by_token(token)
+            if result["success"]:
+                return web.json_response({
+                    "status": "success",
+                    "bot_id": result["bot_id"],
+                    "message": result["message"]
+                })
+            else:
+                return web.json_response({
+                    "status": "error",
+                    "bot_id": result.get("bot_id"),
+                    "message": result["message"]
+                }, status=404 if result.get("bot_id") else 400)
+        except Exception as e:
+            logger.error(f"stop bot by token failed: {e}")
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
+
     app.router.add_post("/api/bots/register", handle_register_bot)
     app.router.add_get("/api/bots/list", handle_list_bots)
     app.router.add_post("/api/bots/stop", handle_stop_bot)
+    app.router.add_post("/api/bots/stop_by_token", handle_stop_bot_by_token)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -2335,11 +2632,37 @@ async def periodic_task(bot: Bot):
         logger.info("周期性任务被取消，正在退出...")
         raise
 
+def _cleanup_expired_lang_cache():
+    """清理過期的語言緩存"""
+    current_time = time.time()
+    expired_user_keys = []
+    expired_group_keys = []
+    
+    # 清理過期的用戶語言緩存
+    for user_id, item in _USER_LANG_PREF.items():
+        if current_time - item.get("ts", 0) > _LANG_CACHE_TTL_SECONDS:
+            expired_user_keys.append(user_id)
+    
+    for key in expired_user_keys:
+        _USER_LANG_PREF.pop(key, None)
+    
+    # 清理過期的群組語言緩存
+    for chat_id, item in _GROUP_LANG_PREF.items():
+        if current_time - item.get("ts", 0) > _LANG_CACHE_TTL_SECONDS:
+            expired_group_keys.append(chat_id)
+    
+    for key in expired_group_keys:
+        _GROUP_LANG_PREF.pop(key, None)
+    
+    if expired_user_keys or expired_group_keys:
+        logger.debug(f"清理了 {len(expired_user_keys)} 个用户语言缓存、{len(expired_group_keys)} 个群组语言缓存")
+
 async def cache_cleanup_task():
-    """定期清理去重缓存的任务"""
+    """定期清理去重缓存和语言缓存的任务"""
     try:
         while True:
             await cleanup_dedup_cache()
+            _cleanup_expired_lang_cache()
             # 每1分钟清理一次缓存
             await asyncio.sleep(60)
     except asyncio.CancelledError:
