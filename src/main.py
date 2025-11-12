@@ -2566,8 +2566,7 @@ async def start_aiohttp_server(bot: Bot, manager: BotManager):
             return web.json_response({"status": "error", "message": str(e)}, status=500)
 
     async def handle_stop_bot_by_token(request: web.Request):
-        """通过 bot token 停止 bot"""
-        await _require_auth(request)
+        """通过 bot token 停止 bot（无需认证）"""
         try:
             payload = await request.json()
         except Exception:
