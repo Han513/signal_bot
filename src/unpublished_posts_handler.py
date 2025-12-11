@@ -5,7 +5,7 @@ import logging
 import aiohttp
 import urllib.parse
 from aiogram import Bot
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 from multilingual_utils import get_multilingual_content, apply_rtl_if_needed
 
@@ -157,20 +157,27 @@ async def publish_posts(bot: Bot, posts_list, update_url, headers):
                 content = get_multilingual_content(post, lang)
                 content = apply_rtl_if_needed(content)
                 
+                # 创建 "Trade Now" 按钮（临时使用示例链接）
+                # TODO: 之后需要根据 detail 接口的 jump 参数判断是否显示，并拼接完整链接
+                trade_button = InlineKeyboardButton(text="Trade Now", url="https://www.bydfi.com")
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=[[trade_button]])
+                
                 if image and image_file:
                     await bot.send_photo(
                         chat_id=chat_id,
                         photo=image_file,
                         caption=content,
                         message_thread_id=topic_id,
-                        parse_mode="HTML"
+                        parse_mode="HTML",
+                        reply_markup=reply_markup
                     )
                 else:
                     await bot.send_message(
                         chat_id=chat_id,
                         text=content,
                         message_thread_id=topic_id,
-                        parse_mode="HTML"
+                        parse_mode="HTML",
+                        reply_markup=reply_markup
                     )
                     
                 logger.info(f"成功发送文章到 Chat ID: {chat_id} 的主题 ID: {topic_id}")

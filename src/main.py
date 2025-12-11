@@ -56,50 +56,53 @@ BOT_REGISTER_API_KEY = os.getenv("BOT_REGISTER_API_KEY")
 DEFAULT_BRAND = os.getenv("DEFAULT_BRAND", "BYD")
 
 # -------------------- 多語言："UID 已被驗證" 文案處理 --------------------
-# 僅針對「This UID has already been verified." 這句固定文案做本地多語映射
-_UID_VERIFIED_MESSAGES = {
-    "en": "This UID has already been verified.",
-    "zh": "此 UID 已被驗證過",
-    "ru": "Этот UID уже был верифицирован.",
-    "id": "UID ini telah diverifikasi.",
-    "ja": "このUIDは既に認証済みです。",
-    "pt": "Este UID já foi verificado.",
-    "fr": "Cet UID a déjà été vérifié.",
-    "es": "Este UID ya ha sido verificado.",
-    "tr": "Bu UID zaten doğrulandı.",
-    "de": "Diese UID wurde bereits verifiziert.",
-    "it": "Questo UID è già stato verificato.",
-    "ar": "تم التحقق من هذا المعرف مسبقًا.",
-    "fa": "این UID قبلاً تأیید شده است.",
-    "vi": "UID này đã được xác minh.",
-    "tl": "Ang UID na ito ay na-verify na.",
-    "th": "UID นี้ได้รับการยืนยันแล้ว",
-    "da": "Denne UID er allerede blevet bekræftet.",
-    "pl": "Ten UID został już zweryfikowany.",
-    "ko": "이 UID는 이미 인증되었습니다.",
-}
+# 【已註釋】前端不再判斷 UID 是否已驗證，統一交由後端驗證接口處理
+# 所有驗證狀態判斷和消息文案都依賴後端返回的響應（msg_text）
+# 以下代碼保留作為歷史參考，不再使用
 
-def _normalize_lang_for_uid_msg(lang: Optional[str]) -> str:
-    """將 API 返回的 lang 正規化到上述鍵值。
-    支援格式：en/en_US/en-GB、zh/zh-CN/zh-TW、in/id、pt-PT 等，未知時回退 en。
-    """
-    if not lang:
-        return "en"
-    raw = str(lang).strip()
-    # 快速路徑
-    if raw in ("en", "en_US", "en-GB", "en-Us", "en-US"):
-        return "en"
-    if raw in ("zh", "zh_CN", "zh-CN", "zh-TW", "zh_TW", "zh-Hant", "zh-Hans", "zh-HK"):
-        return "zh"
-    code = raw.replace("_", "-").lower()
-    primary = code.split("-")[0]
-    if primary == "in":
-        primary = "id"
-    return primary if primary in _UID_VERIFIED_MESSAGES else "en"
+# _UID_VERIFIED_MESSAGES = {
+#     "en": "This UID has already been verified.",
+#     "zh": "此 UID 已被驗證過",
+#     "ru": "Этот UID уже был верифицирован.",
+#     "id": "UID ini telah diverifikasi.",
+#     "ja": "このUIDは既に認証済みです。",
+#     "pt": "Este UID já foi verificado.",
+#     "fr": "Cet UID a déjà été vérifié.",
+#     "es": "Este UID ya ha sido verificado.",
+#     "tr": "Bu UID zaten doğrulandı.",
+#     "de": "Diese UID wurde bereits verifiziert.",
+#     "it": "Questo UID è già stato verificato.",
+#     "ar": "تم التحقق من هذا المعرف مسبقًا.",
+#     "fa": "این UID قبلاً تأیید شده است.",
+#     "vi": "UID này đã được xác minh.",
+#     "tl": "Ang UID na ito ay na-verify na.",
+#     "th": "UID นี้ได้รับการยืนยันแล้ว",
+#     "da": "Denne UID er allerede blevet bekræftet.",
+#     "pl": "Ten UID został już zweryfikowany.",
+#     "ko": "이 UID는 이미 인증되었습니다.",
+# }
 
-def _get_uid_verified_msg_by_lang(lang: Optional[str]) -> str:
-    key = _normalize_lang_for_uid_msg(lang)
-    return _UID_VERIFIED_MESSAGES.get(key, _UID_VERIFIED_MESSAGES["en"]) 
+# def _normalize_lang_for_uid_msg(lang: Optional[str]) -> str:
+#     """將 API 返回的 lang 正規化到上述鍵值。
+#     支援格式：en/en_US/en-GB、zh/zh-CN/zh-TW、in/id、pt-PT 等，未知時回退 en。
+#     """
+#     if not lang:
+#         return "en"
+#     raw = str(lang).strip()
+#     # 快速路徑
+#     if raw in ("en", "en_US", "en-GB", "en-Us", "en-US"):
+#         return "en"
+#     if raw in ("zh", "zh_CN", "zh-CN", "zh-TW", "zh_TW", "zh-Hant", "zh-Hans", "zh-HK"):
+#         return "zh"
+#     code = raw.replace("_", "-").lower()
+#     primary = code.split("-")[0]
+#     if primary == "in":
+#         primary = "id"
+#     return primary if primary in _UID_VERIFIED_MESSAGES else "en"
+
+# def _get_uid_verified_msg_by_lang(lang: Optional[str]) -> str:
+#     key = _normalize_lang_for_uid_msg(lang)
+#     return _UID_VERIFIED_MESSAGES.get(key, _UID_VERIFIED_MESSAGES["en"]) 
 
 # -------------------- 多語言：輸入UID提示 & 已驗證歡迎文本 --------------------
 _PROMPT_ENTER_UID_TEXT = {
@@ -339,7 +342,36 @@ _VERIFY_FAILED_MESSAGES = {
 
 def _get_localized_verify_failed_msg(lang: Optional[str]) -> str:
     key = _coalesce_lang_for_templates(lang or "en")
-    return _VERIFY_FAILED_MESSAGES.get(key, _VERIFY_FAILED_MESSAGES["en"])
+    return _VERIFY_FAILED_MESSAGES.get(key, _VERIFY_FAILED_MESSAGES["en"]) 
+
+# -------------------- 多語言：無法生成邀請鏈接提示 --------------------
+_INVITE_LINK_ERROR_MESSAGES = {
+    "en": "Note: Unable to generate invitation link at this time. Please contact support for group access.",
+    "zh-TW": "注意：目前無法生成邀請連結。請聯繫客服以獲取群組訪問權限。",
+    "zh-CN": "注意：目前无法生成邀请链接。请联系客服以获取群组访问权限。",
+    "ja": "注意：現在招待リンクを生成できません。グループアクセスについてはサポートにお問い合わせください。",
+    "ko": "참고: 현재 초대 링크를 생성할 수 없습니다. 그룹 액세스는 지원팀에 문의하세요.",
+    "ru": "Примечание: В настоящее время невозможно создать пригласительную ссылку. Пожалуйста, свяжитесь со службой поддержки для доступа к группе.",
+    "es": "Nota: No se puede generar el enlace de invitación en este momento. Por favor, contacte con soporte para acceder al grupo.",
+    "pt": "Nota: Não é possível gerar o link de convite no momento. Entre em contato com o suporte para acessar o grupo.",
+    "fr": "Note : Impossible de générer le lien d'invitation pour le moment. Veuillez contacter le support pour accéder au groupe.",
+    "de": "Hinweis: Der Einladungslink kann derzeit nicht generiert werden. Bitte kontaktieren Sie den Support für Gruppenzugriff.",
+    "id": "Catatan: Tidak dapat menghasilkan tautan undangan saat ini. Silakan hubungi dukungan untuk akses grup.",
+    "vi": "Lưu ý: Không thể tạo liên kết mời tại thời điểm này. Vui lòng liên hệ hỗ trợ để truy cập nhóm.",
+    "th": "หมายเหตุ: ไม่สามารถสร้างลิงก์เชิญได้ในขณะนี้ กรุณาติดต่อฝ่ายสนับสนุนเพื่อเข้าถึงกลุ่ม",
+    "tr": "Not: Şu anda davet bağlantısı oluşturulamıyor. Grup erişimi için lütfen destek ile iletişime geçin.",
+    "it": "Nota: Impossibile generare il link di invito al momento. Contattare il supporto per l'accesso al gruppo.",
+    "ar": "ملاحظة: لا يمكن إنشاء رابط الدعوة في الوقت الحالي. يرجى الاتصال بالدعم للوصول إلى المجموعة.",
+    "fa": "توجه: در حال حاضر نمی‌توان لینک دعوت ایجاد کرد. لطفاً برای دسترسی به گروه با پشتیبانی تماس بگیرید.",
+    "tl": "Tandaan: Hindi makakagawa ng invitation link sa ngayon. Mangyaring makipag-ugnayan sa suporta para sa pag-access sa grupo.",
+    "da": "Bemærk: Kan ikke generere invitationslink lige nu. Kontakt venligst support for gruppeadgang.",
+    "pl": "Uwaga: Nie można wygenerować linku zaproszenia w tym momencie. Skontaktuj się z pomocą techniczną, aby uzyskać dostęp do grupy.",
+}
+
+def _get_localized_invite_link_error_msg(lang: Optional[str]) -> str:
+    """獲取本地化的無法生成邀請鏈接提示消息"""
+    key = _coalesce_lang_for_templates(lang or "en")
+    return _INVITE_LINK_ERROR_MESSAGES.get(key, _INVITE_LINK_ERROR_MESSAGES["en"])
 
 # -------------------- 多語言：無法生成邀請鏈接提示 --------------------
 _INVITE_LINK_ERROR_MESSAGES = {
@@ -431,9 +463,13 @@ async def _fetch_lang_from_verify_api_by_bot(message: types.Message, verify_grou
             "brand": current_brand,
             "type": "TELEGRAM",
             "botUsername": bot_name_for_api,
+            "verifyUser": message.from_user.username or "",
+            "verifyApply": message.text or "Failed to get user information",
         }
         if verify_group_id:
             payload["verifyGroup"] = verify_group_id
+        logger.info(f"[fetch_lang_by_bot] About to call VERIFY_API_BY_BOT: {VERIFY_API_BY_BOT}")
+        logger.info(f"[fetch_lang_by_bot] payload: {payload}")
         async with aiohttp.ClientSession() as session_http:
             async with session_http.post(VERIFY_API_BY_BOT, headers=headers, data=payload) as resp:
                 try:
@@ -455,7 +491,16 @@ async def _fetch_lang_from_verify_api_group(message: types.Message, chat_id: Uni
     """在群聊場景呼叫 VERIFY_API 僅為取得語言。失敗則回傳 None。"""
     try:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        payload = {"verifyGroup": chat_id, "code": verify_code, "brand": current_brand, "type": "TELEGRAM"}
+        payload = {
+            "verifyGroup": chat_id,
+            "code": verify_code,
+            "brand": current_brand,
+            "type": "TELEGRAM",
+            "verifyUser": message.from_user.username or "",
+            "verifyApply": message.text or "Failed to get user information",
+        }
+        logger.info(f"[fetch_lang_group] About to call VERIFY_API: {VERIFY_API}")
+        logger.info(f"[fetch_lang_group] payload: {payload}")
         async with aiohttp.ClientSession() as session_http:
             async with session_http.post(VERIFY_API, headers=headers, data=payload) as resp:
                 try:
@@ -638,6 +683,17 @@ def _persist_agent(token: str, brand: str, proxy: Optional[str], bot_name: Optio
         items.append(item)
     _save_agents_store(items)
 
+def _remove_agent(token: str) -> bool:
+    """从持久化存储中删除 bot（通过 token）"""
+    items = _load_agents_store()
+    original_count = len(items)
+    items = [it for it in items if it.get("token") != token]
+    if len(items) < original_count:
+        _save_agents_store(items)
+        logger.info(f"Removed bot from persistent store (token: {token[:10]}...{token[-4:] if len(token) > 14 else ''})")
+        return True
+    return False
+
 def _build_agent_router() -> Router:
     r = Router()
     # group/private verify
@@ -659,19 +715,32 @@ def _build_agent_router() -> Router:
     return r
 
 async def start_persisted_agents(manager: BotManager):
+    path = os.path.abspath(_AGENTS_STORE_PATH)
     items = _load_agents_store()
     if not items:
-        logger.info("No persisted agents to restore")
+        logger.info(f"No persisted agents to restore (checked: {path})")
         return
-    logger.info(f"Restoring {len(items)} persisted agents...")
+    logger.info(f"Restoring {len(items)} persisted agents from {path}...")
     for it in items:
         try:
             token = it.get("token")
             brand = it.get("brand") or DEFAULT_BRAND
             proxy = it.get("proxy")
             enabled = bool(it.get("enabled", True))
-            if not enabled or not token or token == TOKEN:
+            bot_name = it.get("bot_name", "unknown")
+            bot_username = it.get("bot_username", "unknown")
+            
+            # 部分隐藏 token 用于日志
+            token_display = f"{token[:10]}...{token[-4:]}" if token and len(token) > 14 else token
+            
+            if not enabled:
+                logger.info(f"Skipping disabled bot: {bot_name} ({bot_username}), token: {token_display}")
                 continue
+            if not token or token == TOKEN:
+                logger.info(f"Skipping invalid token for bot: {bot_name} ({bot_username})")
+                continue
+            
+            logger.info(f"Restoring bot: {bot_name} ({bot_username}), brand={brand}, token: {token_display}")
             await bot_manager.register_and_start_bot(
                 token=token,
                 brand=brand,
@@ -893,6 +962,8 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
             "brand": current_brand,
             "type": "TELEGRAM",
             "botUsername": bot_name_for_api,
+            "verifyUser": message.from_user.username or "",
+            "verifyApply": message.text or "Failed to get user information",
         }
         if verify_group_id:
             verify_payload["verifyGroup"] = verify_group_id
@@ -955,6 +1026,7 @@ async def _perform_private_verify_flow(message: types.Message, verify_group_id: 
                             verify_group_chat_id = None
                             info_group_chat_id = None
 
+                    # 验证记录由后端管理，不需要前端保存到数据库
                     try:
                         if info_group_chat_id:
                             logger.info(f"[verify_flow] info_group_chat_id: {info_group_chat_id}, type: {type(info_group_chat_id)}")
@@ -1260,7 +1332,7 @@ async def handle_verify_command(message: types.Message):
             bot_manager.record_activity(message.bot.id)
         except Exception:
             pass
-        
+
         # 分割指令以提取验证码
         command_parts = message.text.split()
         if len(command_parts) < 2:
@@ -1351,12 +1423,23 @@ async def handle_verify_command(message: types.Message):
         verify_url = "http://172.31.91.67:4070/admin/telegram/social/verify"
         # verify_url = "http://172.25.183.151:4070/admin/telegram/social/verify"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        verify_payload = {"verifyGroup": chat_id, "code": verify_code, "brand": current_brand, "type": "TELEGRAM"}
+        verify_payload = {
+            "verifyGroup": chat_id,
+            "code": verify_code,
+            "brand": current_brand,
+            "type": "TELEGRAM",
+            "verifyUser": message.from_user.username or "",
+            "verifyApply": message.text or "Failed to get user information",
+        }
+        
+        logger.info(f"[verify_group] About to call VERIFY_API: {VERIFY_API}")
+        logger.info(f"[verify_group] verify_payload: {verify_payload}")
 
         async with aiohttp.ClientSession() as session_http:
             async with session_http.post(VERIFY_API, headers=headers, data=verify_payload) as response:
+                logger.info(f"[verify_group] VERIFY_API response status: {response.status}")
                 response_data = await response.json()
-                logger.info(f"Verify API Response: {response_data}")
+                logger.info(f"[verify_group] Verify API Response: {response_data}")
 
                 # 判断返回的状态码和数据内容（兼容 data 字符串與 data.msg）
                 msg_text = _get_api_message_text(response_data)
@@ -1381,6 +1464,8 @@ async def handle_verify_command(message: types.Message):
                             if lang_from_detail:
                                 _set_group_lang(str(chat_id), str(lang_from_detail))
                                 logger.info(f"[verify_group] Updated group lang cache from detail API: gid={chat_id} lang={lang_from_detail}")
+                    
+                    # 验证记录由后端管理，不需要前端保存到数据库
                     try:
                         # 确保chat_id是整数类型
                         chat_id_int = int(info_group_chat_id) if info_group_chat_id else None
@@ -1523,12 +1608,18 @@ async def handle_private_verify_command(message: types.Message):
             "brand": current_brand,
             "type": "TELEGRAM",
             "botUsername": bot_name_for_api,
+            "verifyUser": message.from_user.username or "",
+            "verifyApply": message.text or "Failed to get user information",
         }
         if verify_group_id:
             verify_payload["verifyGroup"] = verify_group_id
 
+        logger.info(f"[pverify] About to call VERIFY_API_BY_BOT: {VERIFY_API_BY_BOT}")
+        logger.info(f"[pverify] verify_payload: {verify_payload}")
+
         async with aiohttp.ClientSession() as session_http:
             async with session_http.post(VERIFY_API_BY_BOT, headers=headers, data=verify_payload) as response:
+                logger.info(f"[pverify] VERIFY_API_BY_BOT response status: {response.status}")
                 response_data = await response.json()
                 logger.info(f"[pverify] Verify API Response: {response_data}")
 
@@ -2019,9 +2110,14 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                             else:
                                 logger.info(f"群组 {chat_id} 不是验证群")
                         else:
-                            logger.error(f"验证群接口返回失败 {resp_json}，状态码: {response.status}")
+                            # 记录详细的错误信息，但不影响后续流程
+                            error_msg = resp_json.get("message", "Unknown error")
+                            logger.error(f"验证群接口返回失败 {resp_json}，状态码: {response.status}, 错误信息: {error_msg}")
+                            # 如果返回 500 且错误信息是 "Telegram social not found"，可能是配置问题
+                            if response.status == 500 and "Telegram social not found" in str(error_msg):
+                                logger.warning(f"验证群 {chat_id} 可能未在后端配置，跳过欢迎消息处理")
             except Exception as e:
-                logger.error(f"调用验证群接口时出错: {e}")
+                logger.error(f"调用验证群接口时出错: {e}, 群组ID: {chat_id}, 品牌: {current_brand}")
             # 如果是验证群，发送欢迎消息
             # if is_verification_group:
             #     user_mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
@@ -2115,14 +2211,31 @@ async def handle_chat_member_event(event: ChatMemberUpdated):
                     logger.info(f"檢測到 bot {user_id} 加入资讯群 {chat_id}")
                     return
 
+                logger.info(f"[资讯群检查] 用户 {user_id} ({user.full_name}) 加入资讯群 {chat_id}，开始验证检查...")
+                
+                # 增加延迟检查，因为验证记录可能需要时间同步到数据库
+                # 先立即检查一次
                 verified_user = await get_verified_user(user_id, chat_id)
+                logger.info(f"[资讯群检查] 用户 {user_id} 首次数据库检查结果: {'已验证' if verified_user else '未验证'}")
+                
+                # 如果第一次检查未通过，等待 2 秒后再次检查（给数据库同步时间）
                 if not verified_user:
-                    logger.warning(f"未验证用户 {user_id} 试图加入资讯群 {chat_id}，踢出...")
-                    await event.bot.ban_chat_member(chat_id=chat_id, user_id=int(user_id))
-                    # await bot.unban_chat_member(chat_id=chat_id, user_id=int(user_id))  # 可选解禁
+                    logger.info(f"[资讯群检查] 用户 {user_id} 首次检查未通过，等待 2 秒后重试（可能验证记录正在同步）...")
+                    await asyncio.sleep(2)
+                    verified_user = await get_verified_user(user_id, chat_id)
+                    logger.info(f"[资讯群检查] 用户 {user_id} 二次数据库检查结果: {'已验证' if verified_user else '未验证'}")
+                
+                if not verified_user:
+                    logger.warning(f"[资讯群检查] 用户 {user_id} 在资讯群 {chat_id} 中未找到验证记录，准备踢除...")
+                    logger.warning(f"[资讯群检查] 可能的原因：1) 用户未完成验证 2) 验证记录未同步到数据库 3) info_group_id 不匹配")
+                    try:
+                        await event.bot.ban_chat_member(chat_id=chat_id, user_id=int(user_id))
+                        logger.warning(f"[资讯群检查] 已踢除未验证用户 {user_id} ({user.full_name}) 从资讯群 {chat_id}")
+                    except Exception as ban_error:
+                        logger.error(f"[资讯群检查] 踢除用户 {user_id} 时出错: {ban_error}")
                 else:
                     # 已验证用户
-                    logger.info(f"验证通过用户 {user_id} 加入资讯群 {chat_id}")
+                    logger.info(f"[资讯群检查] ✓ 验证通过用户 {user_id} ({user.full_name}) 成功加入资讯群 {chat_id}")
 
     except Exception as e:
         logger.error(f"处理 chat_member 事件时发生错误: {e}")
@@ -2582,6 +2695,8 @@ async def start_aiohttp_server(bot: Bot, manager: BotManager):
         try:
             result = await manager.stop_bot_by_token(token)
             if result["success"]:
+                # 从持久化存储中删除 bot
+                _remove_agent(token)
                 return web.json_response({
                     "status": "success",
                     "bot_id": result["bot_id"],
